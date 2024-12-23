@@ -16,7 +16,7 @@ from rptest.services.kgo_verifier_services import KgoVerifierProducer
 from rptest.services.redpanda import RedpandaService
 from rptest.services.spark_service import SparkService
 from rptest.services.trino_service import TrinoService
-from rptest.tests.datalake.query_engine_base import QueryEngineType
+from rptest.tests.datalake.query_engine_base import QueryEngineBase, QueryEngineType
 from rptest.services.redpanda_connect import RedpandaConnectService
 from rptest.tests.datalake.query_engine_factory import get_query_engine_by_type
 
@@ -84,6 +84,13 @@ class DatalakeServices():
 
     def __exit__(self, *args, **kwargs):
         self.tearDown()
+
+    def query_engine(self, type: QueryEngineType) -> QueryEngineBase:
+        for e in self.query_engines:
+            assert isinstance(e, QueryEngineBase)
+            if e.engine_name() == type:
+                return e
+        raise Exception(f"Query engine {type} not found")
 
     def trino(self) -> TrinoService:
         trino = self.service(QueryEngineType.TRINO)
