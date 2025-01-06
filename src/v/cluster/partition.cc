@@ -1710,7 +1710,7 @@ partition::force_abort_replica_set_update(model::revision_id rev) {
 }
 consensus_ptr partition::raft() const { return _raft; }
 
-ss::future<std::error_code> partition::set_writes_disabled(
+ss::future<result<model::offset>> partition::set_writes_disabled(
   partition_properties_stm::writes_disabled disable,
   model::timeout_clock::time_point deadline) {
     ssx::rwlock::holder holder;

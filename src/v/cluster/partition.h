@@ -362,7 +362,7 @@ public:
     ss::shared_ptr<cloud_storage::async_manifest_view>
     get_cloud_storage_manifest_view();
 
-    ss::future<std::error_code> set_writes_disabled(
+    ss::future<result<model::offset>> set_writes_disabled(
       partition_properties_stm::writes_disabled disable,
       model::timeout_clock::time_point deadline);
 
