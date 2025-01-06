@@ -13,6 +13,7 @@
 #include "base/outcome.h"
 #include "base/seastarx.h"
 #include "cluster/fwd.h"
+#include "cluster/notification.h"
 #include "datalake/errors.h"
 #include "datalake/fwd.h"
 #include "features/fwd.h"
@@ -121,6 +122,7 @@ private:
     model::term_id _term;
     ss::lw_shared_ptr<cluster::partition> _partition;
     ss::shared_ptr<translation_stm> _stm;
+    cluster::partition_flush_hook_id _partition_flush_subscription;
     ss::sharded<coordinator::frontend>* _frontend;
     ss::sharded<features::feature_table>* _features;
     std::unique_ptr<datalake::cloud_data_io>* _cloud_io;
