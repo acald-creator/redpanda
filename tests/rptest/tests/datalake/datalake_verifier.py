@@ -113,7 +113,7 @@ class DatalakeVerifier():
             for p in positions:
                 if p.error is not None:
                     self.logger.warning(
-                        f"Erorr querying position for partition {p.partition}")
+                        f"Error querying position for partition {p.partition}")
                 else:
                     self.logger.debug(
                         f"next position for {p.partition} is {p.offset}")
@@ -156,7 +156,7 @@ class DatalakeVerifier():
     def _verify_next_message(self, partition, iceberg_offset, iceberg_key):
         if partition not in self._consumed_messages:
             self._errors.append(
-                f"Partition {partition} returned from Iceberg query  not found in consumed messages"
+                f"Partition {partition} returned from Iceberg query not found in consumed messages"
             )
 
         p_messages = self._consumed_messages[partition]
@@ -230,6 +230,9 @@ class DatalakeVerifier():
                                         f"violations detected: {self._errors}, stopping verifier"
                                     )
                                     return
+                                self.logger.debug(
+                                    f"verified message on {partition=} offset={row[0]}"
+                                )
 
                     if len(self._max_queried_offsets) > 0:
                         self.logger.debug(
@@ -269,6 +272,8 @@ class DatalakeVerifier():
     def _made_progress(self):
         progress = False
         with self._lock:
+            self.logger.debug(f"{self._max_queried_offsets=}")
+            self.logger.debug(f"{self._last_checkpoint=}")
             for partition, offset in self._max_queried_offsets.items():
                 if offset > self._last_checkpoint.get(partition, -1):
                     progress = True
@@ -290,7 +295,9 @@ class DatalakeVerifier():
                 assert len(
                     self._errors
                 ) == 0, f"Topic {self.topic} validation errors: {self._errors}"
-
+            self.logger.debug(f"No errors around waiting")
+        except Exception as e:
+            self.logger.error(f"Error around waiting: {e}")
         finally:
             self.stop()
 
