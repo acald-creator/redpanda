@@ -406,7 +406,7 @@ private:
     // dirty so that it gets reuploaded
     ss::future<> restart_archiver(bool should_notify_topic_config);
 
-    consensus_ptr _raft;
+    consensus_ptr _raft; // never null
     ss::shared_ptr<cluster::log_eviction_stm> _log_eviction_stm;
     ss::shared_ptr<cluster::rm_stm> _rm_stm;
     ss::shared_ptr<archival_metadata_stm> _archival_meta_stm;
