@@ -48,13 +48,10 @@ concept NestedFieldType = std::is_same_v<std::decay_t<T>, nested_field>;
 template<NestedFieldType T>
 requires std::is_same_v<std::decay_t<T>, nested_field>
 schema_errc_result for_each_field_impl(
-  T* field,
+  chunked_vector<T*>& stk,
   detail::FieldOp<T*> auto&& fn,
-  detail::FieldPredicate auto&& filter,
-  chunked_vector<T*>& stk) {
+  detail::FieldPredicate auto&& filter) {
     constexpr bool is_void_fn = detail::VoidFieldFn<decltype(fn), T*>;
-
-    stk.emplace_back(field);
     while (!stk.empty()) {
         auto* dst = stk.back();
         stk.pop_back();
@@ -88,13 +85,10 @@ schema_errc_result for_each_field_impl(
             return schema_evolution_errc::null_nested_field;
         } else if (!std::invoke(filter, f.get())) {
             continue;
-        } else if (auto res = detail::for_each_field_impl<T>(
-                     f.get(), fn, filter, stk);
-                   res.has_error()) {
-            return res.error();
         }
+        stk.push_back(f.get());
     }
-    return std::nullopt;
+    return detail::for_each_field_impl<T>(stk, fn, filter);
 }
 
 } // namespace detail
@@ -125,7 +119,8 @@ schema_errc_result for_each_field(
   detail::FieldOp<T*> auto&& fn,
   detail::FieldPredicate auto&& filter) {
     chunked_vector<T*> stk{};
-    return detail::for_each_field_impl(&field, fn, filter, stk);
+    stk.push_back(&field);
+    return detail::for_each_field_impl(stk, fn, filter);
 }
 
 /**
@@ -134,8 +129,9 @@ schema_errc_result for_each_field(
 template<detail::NestedFieldType T>
 schema_errc_result for_each_field(T& field, detail::FieldOp<T*> auto&& fn) {
     chunked_vector<T*> stk{};
+    stk.push_back(&field);
     return detail::for_each_field_impl(
-      &field, fn, [](const nested_field*) { return true; }, stk);
+      stk, fn, [](const nested_field*) { return true; });
 }
 
 /**
