@@ -201,6 +201,43 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "iceberg_snapshot_remover",
+    srcs = [
+        "iceberg_snapshot_remover.cc",
+    ],
+    hdrs = [
+        "iceberg_snapshot_remover.h",
+    ],
+    implementation_deps = [
+        "//src/v/datalake:logger",
+        "//src/v/iceberg:manifest_entry",
+        "//src/v/iceberg:transaction",
+    ],
+    include_prefix = "datalake/coordinator",
+    deps = [
+        ":snapshot_remover",
+        "//src/v/base",
+        "//src/v/iceberg:catalog",
+        "//src/v/iceberg:manifest_io",
+        "//src/v/utils:prefix_logger",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "snapshot_remover",
+    hdrs = [
+        "snapshot_remover.h",
+    ],
+    include_prefix = "datalake/coordinator",
+    deps = [
+        "//src/v/base",
+        "//src/v/model",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
     name = "state",
     srcs = [
         "state.cc",
