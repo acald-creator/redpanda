@@ -169,13 +169,15 @@ class DataMigrationsApiTest(RedpandaTest):
 
     @contextmanager
     def flaky_admin_cm(self, other_cm):
-        with other_cm:
-            old_admin = self.admin
-            try:
-                self.admin = self.flaky_admin
+        self.logger.info("switching to flaky admin")
+        old_admin = self.admin
+        try:
+            self.admin = self.flaky_admin
+            with other_cm:
                 yield
-            finally:
-                self.admin = old_admin
+        finally:
+            self.logger.info("switching to non-flaky admin")
+            self.admin = old_admin
 
     def finj_thread(self):
         return self.flaky_admin_cm(
