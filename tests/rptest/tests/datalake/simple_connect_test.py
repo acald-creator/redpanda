@@ -23,6 +23,10 @@ from ducktape.mark import matrix
 
 
 class RedpandaConnectIcebergTest(RedpandaTest):
+    TOPIC_NAME = "ducky_topic"
+    PARTITION_COUNT = 5
+    FAST_COMMIT_INTVL_S = 5
+    SLOW_COMMIT_INTVL_S = 60
 
     verifier_schema_avro = """
 {
@@ -57,8 +61,10 @@ class RedpandaConnectIcebergTest(RedpandaTest):
                                    cloud_storage_enable_remote_read=False,
                                    cloud_storage_enable_remote_write=False),
             extra_rp_conf={
-                "iceberg_enabled": True,
-                "iceberg_catalog_commit_interval_ms": 5000
+                "iceberg_enabled":
+                True,
+                "iceberg_catalog_commit_interval_ms":
+                self.FAST_COMMIT_INTVL_S * 1000
             },
             schema_registry_config=SchemaRegistryConfig())
 
@@ -107,33 +113,40 @@ class RedpandaConnectIcebergTest(RedpandaTest):
             rpk.create_schema(subject, tf.name)
 
     @cluster(num_nodes=6)
-    @matrix(cloud_storage_type=supported_storage_types())
-    def test_translating_avro_serialized_records(self, cloud_storage_type):
-        topic_name = "ducky-topic"
+    @matrix(cloud_storage_type=supported_storage_types(),
+            scenario=["simple"])
+    def test_translating_avro_serialized_records(self, cloud_storage_type,
+                                                 scenario):
         with DatalakeServices(self.test_context,
                               redpanda=self.redpanda,
                               filesystem_catalog_mode=False,
                               include_query_engines=[
                                   QueryEngineType.SPARK,
-                              ]) as dl:
-
-            dl.create_iceberg_enabled_topic(
-                topic_name,
-                partitions=5,
+                              ]) as datalake:
+            extra_config = {}
+            datalake.create_iceberg_enabled_topic(
+                self.TOPIC_NAME,
+                partitions=self.PARTITION_COUNT,
                 replicas=3,
-                iceberg_mode="value_schema_id_prefix")
+                iceberg_mode="value_schema_id_prefix",
+                config=extra_config)
 
             self._create_schema("verifier_schema", self.verifier_schema_avro)
             connect = RedpandaConnectService(self.test_context, self.redpanda)
             connect.start()
+            verifier = DatalakeVerifier(self.redpanda, self.TOPIC_NAME,
+                                        datalake.spark())
+            scenario_verification_fn = {
+                "simple": self.verify_simple_scenario,
+            }[scenario]
+            scenario_verification_fn(connect, verifier)
 
-            # create verifier
-            verifier = DatalakeVerifier(self.redpanda, topic_name, dl.spark())
-            # create a stream
-            connect.start_stream(name="ducky_stream",
-                                 config=self.avro_stream_config(
-                                     topic_name, "verifier_schema"))
+    def verify_simple_scenario(self, connect, verifier):
+        connect.start_stream(name="ducky_stream",
+                             config=self.avro_stream_config(
+                                 self.TOPIC_NAME, "verifier_schema", 3000))
+        verifier.start()
+        connect.stop_stream("ducky_stream")
+        verifier.wait()
 
-            verifier.start()
-            connect.stop_stream("ducky_stream")
-            verifier.wait()
+
