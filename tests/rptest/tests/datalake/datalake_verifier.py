@@ -80,6 +80,7 @@ class DatalakeVerifier():
         # map of last queried offset for each partition
         self._max_queried_offsets = {}
         self._last_checkpoint = {}
+        self._received_first_iceberg_message = threading.Event()
 
         self._compacted = compacted
         # When consuming from a compacted topic, there may be records in the
@@ -177,7 +178,8 @@ class DatalakeVerifier():
                 f"Duplicate entry detected at offset {iceberg_offset} for partition {partition} "
             )
             return
-
+        if not self._max_queried_offsets:
+            self._received_first_iceberg_message.set()
         self._max_queried_offsets[partition] = iceberg_offset
 
         if consumer_offset != iceberg_offset:
@@ -243,9 +245,11 @@ class DatalakeVerifier():
                 self.logger.error(f"Error querying iceberg table: {e}")
                 sleep(2)
 
-    def start(self):
+    def start(self, wait_first_iceberg_msg=False):
         self._executor.submit(self._consumer_thread)
         self._executor.submit(self._query_thread)
+        if wait_first_iceberg_msg:
+            self._received_first_iceberg_message.wait()
 
     def _all_offsets_translated(self):
         partitions = self._rpk.describe_topic(self.topic)
