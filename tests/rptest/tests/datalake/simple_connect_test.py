@@ -68,13 +68,13 @@ class RedpandaConnectIcebergTest(RedpandaTest):
             },
             schema_registry_config=SchemaRegistryConfig())
 
-    def avro_stream_config(self, topic, subject):
+    def avro_stream_config(self, topic, subject, cnt=3000):
         return {
             "input": {
                 "generate": {
                     "mapping": "root = counter()",
                     "interval": "",
-                    "count": 3000,
+                    "count": cnt,
                     "batch_size": 1
                 }
             },
