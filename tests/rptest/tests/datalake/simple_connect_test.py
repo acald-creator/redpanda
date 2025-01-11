@@ -21,8 +21,12 @@ from rptest.tests.redpanda_test import RedpandaTest
 from rptest.tests.datalake.utils import supported_storage_types
 from ducktape.mark import matrix
 
+from rptest.services.admin import Admin, NamespacedTopic, InboundTopic, OutboundDataMigration, MigrationAction
+from rptest.clients.types import TopicSpec
+from rptest.utils.data_migrations import DataMigrationTestMixin
 
-class RedpandaConnectIcebergTest(RedpandaTest):
+
+class RedpandaConnectIcebergTest(RedpandaTest, DataMigrationTestMixin):
     TOPIC_NAME = "ducky_topic"
     PARTITION_COUNT = 5
     FAST_COMMIT_INTVL_S = 5
@@ -114,7 +118,7 @@ class RedpandaConnectIcebergTest(RedpandaTest):
 
     @cluster(num_nodes=6)
     @matrix(cloud_storage_type=supported_storage_types(),
-            scenario=["simple"])
+            scenario=["simple", "unmount", "remount"])
     def test_translating_avro_serialized_records(self, cloud_storage_type,
                                                  scenario):
         with DatalakeServices(self.test_context,
@@ -123,7 +127,12 @@ class RedpandaConnectIcebergTest(RedpandaTest):
                               include_query_engines=[
                                   QueryEngineType.SPARK,
                               ]) as datalake:
-            extra_config = {}
+            extra_config = {} if scenario == "simple" else {
+                "redpanda.remote.read": "true",
+                "redpanda.remote.write": "true"
+            }
+            if scenario == "unmount":
+                extra_config["redpanda.iceberg.delete"] = "false"
             datalake.create_iceberg_enabled_topic(
                 self.TOPIC_NAME,
                 partitions=self.PARTITION_COUNT,
@@ -138,6 +147,8 @@ class RedpandaConnectIcebergTest(RedpandaTest):
                                         datalake.spark())
             scenario_verification_fn = {
                 "simple": self.verify_simple_scenario,
+                "unmount": self.verify_unmount_scenario,
+                "remount": self.verify_remount_scenario,
             }[scenario]
             scenario_verification_fn(connect, verifier)
 
@@ -149,4 +160,72 @@ class RedpandaConnectIcebergTest(RedpandaTest):
         connect.stop_stream("ducky_stream")
         verifier.wait()
 
+    def verify_unmount_scenario(self, connect, verifier):
+        connect.start_stream(name="ducky_stream",
+                             config=self.avro_stream_config(
+                                 self.TOPIC_NAME, "verifier_schema", 1000000))
+        # todo make reasonable or just make sure something went through
+        self.redpanda.set_cluster_config({
+            "iceberg_catalog_commit_interval_ms":
+            self.SLOW_COMMIT_INTVL_S * 1000
+        })
+        verifier.start(wait_first_iceberg_msg=True)
+        self.admin = Admin(self.redpanda)
+        ns_topic = NamespacedTopic(self.TOPIC_NAME)
 
+        out_migration = OutboundDataMigration([ns_topic], consumer_groups=[])
+        out_migration_id = self.create_and_wait(out_migration)
+        self.admin.execute_data_migration_action(out_migration_id,
+                                                 MigrationAction.prepare)
+        self.wait_for_migration_states(out_migration_id, ['prepared'])
+        self.admin.execute_data_migration_action(out_migration_id,
+                                                 MigrationAction.execute)
+        # the topic goes read-only during this wait
+        self.wait_for_migration_states(out_migration_id, ['executed'])
+        connect.stop_stream("ducky_stream", should_finish=False)
+        time.sleep(1)  # just it case: let verifier consume remaining messages
+        verifier.go_offline()
+
+        self.admin.execute_data_migration_action(out_migration_id,
+                                                 MigrationAction.finish)
+        self.wait_for_migration_states(out_migration_id, ['finished'])
+        self.wait_partitions_disappear([self.TOPIC_NAME])
+
+        verifier.wait(progress_timeout_sec=10 * self.SLOW_COMMIT_INTVL_S)
+
+    def verify_remount_scenario(self, connect, verifier):
+        self.redpanda.set_cluster_config({
+            "iceberg_catalog_commit_interval_ms":
+            self.SLOW_COMMIT_INTVL_S * 1000
+        })
+        connect.start_stream(name="ducky_stream",
+                             config=self.avro_stream_config(
+                                 self.TOPIC_NAME, "verifier_schema", 100000))
+        self.admin = Admin(self.redpanda)
+        ns_topic = NamespacedTopic(self.TOPIC_NAME)
+        self.logger.info(f"unmounting {self.TOPIC_NAME}")
+        self.admin.unmount_topics([ns_topic])
+        self.wait_partitions_disappear([self.TOPIC_NAME])
+        self.logger.info(f"unmounted {self.TOPIC_NAME}")
+
+        connect.stop_stream("ducky_stream", should_finish=False)
+
+        self.logger.info(f"remounting {self.TOPIC_NAME}")
+        self.admin.mount_topics([InboundTopic(ns_topic)])
+        self.wait_partitions_appear([
+            TopicSpec(name=self.TOPIC_NAME,
+                      partition_count=self.PARTITION_COUNT)
+        ])
+        self.logger.info(f"remounted {self.TOPIC_NAME}")
+
+        self.redpanda.set_cluster_config({
+            "iceberg_catalog_commit_interval_ms":
+            self.FAST_COMMIT_INTVL_S * 1000
+        })
+
+        verifier.start()
+        connect.start_stream(name="ducky_stream2",
+                             config=self.avro_stream_config(
+                                 self.TOPIC_NAME, "verifier_schema", 3000))
+        connect.stop_stream("ducky_stream2")
+        verifier.wait(progress_timeout_sec=2 * self.SLOW_COMMIT_INTVL_S)
