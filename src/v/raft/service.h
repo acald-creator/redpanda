@@ -173,7 +173,7 @@ public:
         return _probe.append_entries().then([this, r = std::move(r)]() mutable {
             auto gr = r.target_group();
             return dispatch_request(
-              append_entries_request::make_foreign(std::move(r)),
+              std::move(r),
               [gr]() { return make_missing_group_reply(gr); },
               [](append_entries_request&& r, consensus_ptr c) {
                   return c->append_entries(std::move(r));
@@ -187,7 +187,7 @@ public:
             auto request = std::move(r).release();
             const raft::group_id gr = request.target_group();
             return dispatch_request(
-              append_entries_request::make_foreign(std::move(request)),
+              std::move(request),
               [gr]() { return make_missing_group_reply(gr); },
               [](append_entries_request&& req, consensus_ptr c) {
                   return c->append_entries(std::move(req));
@@ -366,8 +366,7 @@ private:
           hb.node_id,
           hb.target_node_id,
           hb.meta,
-          model::make_memory_record_batch_reader(
-            ss::circular_buffer<model::record_batch>{}),
+          {},
           0,
           flush_after_append::no};
     }
@@ -388,8 +387,7 @@ private:
             // same
             .dirty_offset = hb.data->prev_log_index,
           },
-          model::make_memory_record_batch_reader(
-            ss::circular_buffer<model::record_batch>{}),
+          {},
           0,
           flush_after_append::no};
     }
