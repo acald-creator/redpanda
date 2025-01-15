@@ -88,6 +88,35 @@ ss::future<> spill_key_index::index(
     });
 }
 
+ss::future<>
+spill_key_index::spill_some(size_t entry_size, size_t min_index_size) {
+    auto stop_cond = [this, entry_size, min_index_size] {
+        size_t total_mem = idx_mem_usage() + _keys_mem_usage + entry_size;
+
+        // Instance-local capacity check
+        bool local_ok = total_mem < _max_mem;
+
+        // Shard-wide capacity check
+        bool global_ok = _resources.compaction_index_bytes_available()
+                         || total_mem < min_index_size;
+
+        // Stop condition: none of our size thresholds must be violated
+        return _midx.empty() || (local_ok && global_ok);
+    };
+
+    while (!stop_cond()) {
+        /**
+         * Evict first entry, we use hash function that guarante good
+         * randomness so evicting first entry is actually evicting a
+         * pseudo random elemnent
+         */
+        auto node = _midx.extract(_midx.begin());
+        release_entry_memory(node.key());
+        co_await spill(
+          compacted_index::entry_type::key, node.key(), node.mapped());
+    }
+}
+
 ss::future<> spill_key_index::add_key(compaction_key b, value_type v) {
     auto f = ss::now();
     const auto entry_size = entry_mem_usage(b);
@@ -108,36 +137,7 @@ ss::future<> spill_key_index::add_key(compaction_key b, value_type v) {
     if (
       (take_result.checkpoint_hint && expected_size > min_index_size)
       || expected_size >= _max_mem) {
-        f = ss::do_until(
-          [this, entry_size, min_index_size] {
-              size_t total_mem = idx_mem_usage() + _keys_mem_usage + entry_size;
-
-              // Instance-local capacity check
-              bool local_ok = total_mem < _max_mem;
-
-              // Shard-wide capacity check
-              bool global_ok = _resources.compaction_index_bytes_available()
-                               || total_mem < min_index_size;
-
-              // Stop condition: none of our size thresholds must be violated
-              return _midx.empty() || (local_ok && global_ok);
-          },
-          [this] {
-              /**
-               * Evict first entry, we use hash function that guarante good
-               * randomness so evicting first entry is actually evicting a
-               * pseudo random elemnent
-               */
-              auto node = _midx.extract(_midx.begin());
-
-              return ss::do_with(
-                node.key(),
-                node.mapped(),
-                [this](const bytes& k, value_type o) {
-                    release_entry_memory(k);
-                    return spill(compacted_index::entry_type::key, k, o);
-                });
-          });
+        f = spill_some(entry_size, min_index_size);
     }
 
     return f.then([this, entry_size, b = std::move(b), v]() mutable {

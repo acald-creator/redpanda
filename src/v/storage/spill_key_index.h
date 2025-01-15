@@ -119,6 +119,10 @@ private:
     ss::future<> open();
     ss::future<> drain_all_keys();
     ss::future<> add_key(compaction_key, value_type);
+    // called during add_key if the index should have keys spilled into the
+    // backing file in order to free up capacity for new keys. see function for
+    // details on the exact spill policy.
+    ss::future<> spill_some(size_t entry_size, size_t min_index_size);
     ss::future<> spill(compacted_index::entry_type, bytes_view, value_type);
 
     std::optional<ntp_sanitizer_config> _sanitizer_config;
