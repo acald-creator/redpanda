@@ -97,7 +97,7 @@ private:
         return debug::AllocatedByteSize(_midx);
     }
 
-    size_t entry_mem_usage(const bytes& k) const {
+    static size_t entry_mem_usage(const bytes& k) {
         // One entry in a node hash map: key and value
         // are allocated together, and the key is a basic_sstring with
         // internal buffer that may be spilled if key was longer.
