@@ -14,6 +14,7 @@
 #include "bytes/bytes.h"
 #include "random/generators.h"
 #include "reflection/adl.h"
+#include "ssx/async_algorithm.h"
 #include "storage/compacted_index.h"
 #include "storage/compacted_index_writer.h"
 #include "storage/logger.h"
@@ -104,16 +105,27 @@ spill_key_index::spill_some(size_t entry_size, size_t min_index_size) {
         return _midx.empty() || (local_ok && global_ok);
     };
 
+    /*
+     * Collect keys to spill in a buffer until the stop condition is met and
+     * then dump all of them at once into the backing file. A periodic yield is
+     * introduced to reduce the chance of a reactor stall.
+     */
+    ssize_t yield_count = 0;
+    spill_payload payload;
     while (!stop_cond()) {
-        /**
-         * Evict first entry, we use hash function that guarante good
-         * randomness so evicting first entry is actually evicting a
-         * pseudo random elemnent
-         */
-        auto node = _midx.extract(_midx.begin());
-        release_entry_memory(node.key());
-        co_await spill(
-          compacted_index::entry_type::key, node.key(), node.mapped());
+        auto it = _midx.begin();
+        release_entry_memory(it->first);
+        append_to_spill_payload(
+          payload, compacted_index::entry_type::key, it->first, it->second);
+        _midx.erase(it);
+        if (++yield_count >= ssx::async_algo_traits::interval) {
+            co_await ss::coroutine::maybe_yield();
+            yield_count = 0;
+        }
+    }
+
+    if (!payload.data.empty()) {
+        co_await spill(std::move(payload));
     }
 }
 
