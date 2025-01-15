@@ -147,6 +147,7 @@ private:
     bool _truncate;
     std::optional<segment_appender> _appender;
     underlying_t _midx;
+    bytes _last_key_indexed;
 
     // Max memory we'll use for _midx, although we may spill earlier
     // if hinted to by storage_resources

@@ -109,15 +109,38 @@ spill_key_index::spill_some(size_t entry_size, size_t min_index_size) {
      * Collect keys to spill in a buffer until the stop condition is met and
      * then dump all of them at once into the backing file. A periodic yield is
      * introduced to reduce the chance of a reactor stall.
+     *
+     * In order to avoid creating hot erase spots we start removal at the
+     * location immediately after the last inserted key. The exact last inserted
+     * key is skipped to maintain good hit locality, and the next key should not
+     * have any temporal correlation to recent inserts.
+     *
+     * The amount of randomness this introduces is highly dependent on the
+     * workload, but it is better than always erasing at begin(). One may want
+     * to explore storing the last N inserted unique keys and randomly selecting
+     * from this set.
      */
     ssize_t yield_count = 0;
     spill_payload payload;
+
+    auto it = _midx.find(_last_key_indexed);
+    if (it == _midx.end() || (++it == _midx.end())) {
+        it = _midx.begin();
+    }
+
     while (!stop_cond()) {
-        auto it = _midx.begin();
+        // `next` might be end(), so don't dereference
+        auto next = std::next(it);
         release_entry_memory(it->first);
         append_to_spill_payload(
           payload, compacted_index::entry_type::key, it->first, it->second);
         _midx.erase(it);
+        if (next == _midx.end()) {
+            next = _midx.begin();
+        }
+        // `it` is guaranteed to not be end() provided that _midx is not empty.
+        // if it is empty, then stop_cond() will stop the next loop iteration.
+        it = next;
         if (++yield_count >= ssx::async_algo_traits::interval) {
             co_await ss::coroutine::maybe_yield();
             yield_count = 0;
@@ -159,6 +182,7 @@ ss::future<> spill_key_index::add_key(compaction_key b, value_type v) {
         // No update to _mem_units here: we already took units at top
         // of add_key before starting the write.
 
+        _last_key_indexed = b;
         _midx.insert({std::move(b), v});
     });
 }
