@@ -12,6 +12,7 @@
 #include "config/mock_property.h"
 #include "datalake/coordinator/coordinator.h"
 #include "datalake/coordinator/file_committer.h"
+#include "datalake/coordinator/snapshot_remover.h"
 #include "datalake/coordinator/state_machine.h"
 #include "datalake/coordinator/state_update.h"
 #include "datalake/coordinator/tests/state_test_utils.h"
@@ -57,11 +58,13 @@ struct coordinator_node {
     coordinator_node(
       ss::shared_ptr<coordinator_stm> stm,
       std::unique_ptr<file_committer> committer,
+      std::unique_ptr<snapshot_remover> remover,
       std::chrono::milliseconds commit_interval)
       : stm(*stm)
       , commit_interval_ms(commit_interval)
       , topic_table(mr)
       , file_committer(std::move(committer))
+      , snapshot_remover(std::move(remover))
       , crd(
           stm,
           topic_table,
@@ -70,6 +73,7 @@ struct coordinator_node {
               return remove_tombstone(t, r);
           },
           *file_committer,
+          *snapshot_remover,
           commit_interval_ms.bind()) {}
 
     ss::future<checked<std::nullopt_t, coordinator::errc>>
@@ -91,6 +95,7 @@ struct coordinator_node {
     cluster::topic_table topic_table;
     noop_table_creator table_creator;
     std::unique_ptr<file_committer> file_committer;
+    std::unique_ptr<snapshot_remover> snapshot_remover;
     coordinator crd;
 };
 
@@ -211,11 +216,13 @@ public:
                 crds.at(id()) = std::make_unique<coordinator_node>(
                   std::move(stm),
                   std::make_unique<noop_file_committer>(),
+                  std::make_unique<noop_snapshot_remover>(),
                   args.file_commit_interval);
             } else {
                 crds.at(id()) = std::make_unique<coordinator_node>(
                   std::move(stm),
                   std::make_unique<simple_file_committer>(),
+                  std::make_unique<noop_snapshot_remover>(),
                   args.file_commit_interval);
             }
         }

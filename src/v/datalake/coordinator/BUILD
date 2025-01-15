@@ -37,6 +37,7 @@ redpanda_cc_library(
         "coordinator.h",
     ],
     implementation_deps = [
+        ":iceberg_snapshot_remover",
         "//src/v/base",
         "//src/v/datalake:logger",
         "//src/v/datalake:schema_identifier",
@@ -49,6 +50,7 @@ redpanda_cc_library(
     include_prefix = "datalake/coordinator",
     deps = [
         ":file_committer",
+        ":snapshot_remover",
         ":state_update",
         ":stm",
         "//src/v/cluster",
@@ -69,6 +71,7 @@ redpanda_cc_library(
     ],
     implementation_deps = [
         ":iceberg_file_committer",
+        ":iceberg_snapshot_remover",
         "//src/v/base",
         "//src/v/config",
         "//src/v/datalake:catalog_schema_manager",

@@ -55,6 +55,7 @@ struct coordinator_stm_fixture : stm_raft_fixture<stm> {
                     return remove_tombstone(t, r);
                 },
                 file_committer,
+                snapshot_remover,
                 commit_interval());
             coordinators[node.get_vnode()]->start();
             return ss::now();
@@ -137,6 +138,7 @@ struct coordinator_stm_fixture : stm_raft_fixture<stm> {
     cluster::topic_table topic_table{mr};
     datalake::coordinator::noop_table_creator table_creator;
     datalake::coordinator::simple_file_committer file_committer;
+    datalake::coordinator::noop_snapshot_remover snapshot_remover;
     absl::flat_hash_map<raft::vnode, coordinator> coordinators;
 };
 

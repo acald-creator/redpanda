@@ -13,8 +13,8 @@
 #include "config/property.h"
 #include "container/fragmented_vector.h"
 #include "datalake/coordinator/file_committer.h"
+#include "datalake/coordinator/snapshot_remover.h"
 #include "datalake/coordinator/state_machine.h"
-#include "datalake/coordinator/state_update.h"
 #include "datalake/fwd.h"
 #include "model/fundamental.h"
 
@@ -44,12 +44,14 @@ public:
       table_creator& table_creator,
       remove_tombstone_f remove_tombstone,
       file_committer& file_committer,
+      snapshot_remover& snapshot_remover,
       config::binding<std::chrono::milliseconds> commit_interval)
       : stm_(std::move(stm))
       , topic_table_(topics)
       , table_creator_(table_creator)
       , remove_tombstone_(std::move(remove_tombstone))
       , file_committer_(file_committer)
+      , snapshot_remover_(snapshot_remover)
       , commit_interval_(std::move(commit_interval)) {}
 
     void start();
@@ -98,6 +100,7 @@ private:
     table_creator& table_creator_;
     remove_tombstone_f remove_tombstone_;
     file_committer& file_committer_;
+    snapshot_remover& snapshot_remover_;
     config::binding<std::chrono::milliseconds> commit_interval_;
 
     ss::gate gate_;

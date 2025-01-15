@@ -31,6 +31,7 @@ class registry;
 
 namespace datalake::coordinator {
 class catalog_factory;
+class snapshot_remover;
 
 // Manages the lifecycle of datalake coordinators, each of which operate on a
 // single partition of the control topic.
@@ -79,6 +80,7 @@ private:
     std::unique_ptr<type_resolver> type_resolver_;
     std::unique_ptr<table_creator> table_creator_;
     std::unique_ptr<file_committer> file_committer_;
+    std::unique_ptr<snapshot_remover> snapshot_remover_;
 
     std::optional<cluster::notification_id_type> manage_notifications_;
     std::optional<cluster::notification_id_type> unmanage_notifications_;
