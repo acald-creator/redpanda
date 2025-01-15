@@ -197,53 +197,67 @@ ss::future<> spill_key_index::index(
       delta);
 }
 
+ss::future<> spill_key_index::spill(
+  compacted_index::entry_type type, bytes_view b, value_type v) {
+    spill_payload payload;
+    append_to_spill_payload(payload, type, b, v);
+    co_await spill(std::move(payload));
+}
+
+ss::future<> spill_key_index::spill(spill_payload payload) {
+    _footer.keys += payload.keys;
+    _footer.keys_deprecated += payload.keys;
+    _footer.size += payload.data.size_bytes();
+    _footer.size_deprecated = _footer.size;
+    for (auto& f : payload.data) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        _crc.extend(reinterpret_cast<const uint8_t*>(f.get()), f.size());
+    }
+    // Append to the file
+    co_await maybe_open();
+    co_await _appender->append(payload.data);
+}
+
 /// format is:
 /// INT16 BYTE VINT VINT []BYTE
 ///
-ss::future<> spill_key_index::spill(
-  compacted_index::entry_type type, bytes_view b, value_type v) {
+void spill_key_index::append_to_spill_payload(
+  spill_payload& payload,
+  compacted_index::entry_type type,
+  bytes_view b,
+  value_type v) {
     constexpr size_t size_reservation = sizeof(uint16_t);
-    ++_footer.keys;
-    ++_footer.keys_deprecated;
-    iobuf payload;
+    ++payload.keys;
+    const auto payload_start_size = payload.data.size_bytes();
     // INT16
-    auto ph = payload.reserve(size_reservation);
+    auto ph = payload.data.reserve(size_reservation);
     // BYTE
-    payload.append(reinterpret_cast<const uint8_t*>(&type), 1);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    payload.data.append(reinterpret_cast<const uint8_t*>(&type), 1);
     // VINT
     {
         auto x = vint::to_bytes(v.base_offset);
-        payload.append(x.data(), x.size());
+        payload.data.append(x.data(), x.size());
     }
     // VINT
     {
         auto x = vint::to_bytes(v.delta);
-        payload.append(x.data(), x.size());
+        payload.data.append(x.data(), x.size());
     }
     // []BYTE
     {
         size_t key_size = std::min(max_key_size, b.size());
-
-        payload.append(b.data(), key_size);
+        payload.data.append(b.data(), key_size);
     }
-    const size_t size = payload.size_bytes() - size_reservation;
+    const auto payload_size = payload.data.size_bytes() - payload_start_size;
+    const size_t size = payload_size - size_reservation;
     const size_t size_le = ss::cpu_to_le(size); // downcast
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     ph.write(reinterpret_cast<const char*>(&size_le), size_reservation);
-
-    // update internal state
-    _footer.size += payload.size_bytes();
-    _footer.size_deprecated = _footer.size;
-    for (auto& f : payload) {
-        // NOLINTNEXTLINE
-        _crc.extend(reinterpret_cast<const uint8_t*>(f.get()), f.size());
-    }
     vassert(
-      payload.size_bytes() <= compacted_index::max_entry_size,
+      payload_size <= compacted_index::max_entry_size,
       "Entries cannot be bigger than uint16_t::max(): {}",
-      payload);
-    // Append to the file
-    co_await maybe_open();
-    co_await _appender->append(payload);
+      payload.data);
 }
 
 ss::future<> spill_key_index::append(compacted_index::entry e) {

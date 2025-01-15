@@ -125,6 +125,22 @@ private:
     ss::future<> spill_some(size_t entry_size, size_t min_index_size);
     ss::future<> spill(compacted_index::entry_type, bytes_view, value_type);
 
+    // a buffer to collect multiple spilled keys
+    struct spill_payload {
+        iobuf data;
+        uint32_t keys{0};
+    };
+
+    // append a spilled key into the payload buffer
+    static void append_to_spill_payload(
+      spill_payload& payload,
+      compacted_index::entry_type type,
+      bytes_view b,
+      value_type v);
+
+    // append all the keys added to the given payload
+    ss::future<> spill(spill_payload);
+
     std::optional<ntp_sanitizer_config> _sanitizer_config;
     storage_resources& _resources;
     ss::io_priority_class _pc;
