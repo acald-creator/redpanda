@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "publicapi",
@@ -13,11 +13,25 @@ go_library(
     deps = [
         "//src/go/rpk/pkg/httpapi",
         "@build_buf_gen_go_redpandadata_cloud_connectrpc_go//redpanda/api/controlplane/v1beta2/controlplanev1beta2connect",
+        "@build_buf_gen_go_redpandadata_cloud_connectrpc_go//redpanda/api/iam/v1beta2/iamv1beta2connect",
         "@build_buf_gen_go_redpandadata_cloud_protocolbuffers_go//redpanda/api/controlplane/v1beta2",
         "@build_buf_gen_go_redpandadata_common_protocolbuffers_go//redpanda/api/common/v1alpha1",
         "@build_buf_gen_go_redpandadata_dataplane_connectrpc_go//redpanda/api/dataplane/v1alpha2/dataplanev1alpha2connect",
         "@build_buf_gen_go_redpandadata_dataplane_protocolbuffers_go//redpanda/api/dataplane/v1alpha2",
         "@com_connectrpc_connect//:connect",
         "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_test(
+    name = "publicapi_test",
+    srcs = ["iam_test.go"],
+    embed = [":publicapi"],
+    deps = [
+        "//src/go/rpk/pkg/cloudapi",
+        "//src/go/rpk/pkg/httpapi",
+        "@build_buf_gen_go_redpandadata_cloud_protocolbuffers_go//redpanda/api/iam/v1beta2",
+        "@com_connectrpc_connect//:connect",
+        "@com_github_stretchr_testify//require",
     ],
 )

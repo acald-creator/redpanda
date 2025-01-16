@@ -95,7 +95,7 @@ func TestLoadFlow(t *testing.T) {
 			}
 			cfg, err := p.Load(fs)
 			require.NoError(t, err)
-			authVir, _, _, _, err := LoadFlow(context.Background(), fs, cfg, &m, false, false, "")
+			authVir, _, _, _, err := LoadFlow(context.Background(), fs, cfg, &m, false, false)
 			if tt.expErr {
 				require.Error(t, err)
 				return

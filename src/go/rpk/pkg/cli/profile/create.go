@@ -19,7 +19,6 @@ import (
 	"time"
 
 	controlplanev1beta2 "buf.build/gen/go/redpandadata/cloud/protocolbuffers/go/redpanda/api/controlplane/v1beta2"
-
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/adminapi"
 	container "github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/container/common"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/cloudapi"
@@ -342,10 +341,7 @@ func createCloudProfile(ctx context.Context, yAuthVir *config.RpkCloudAuth, cfg 
 	}
 	cl := cloudapi.NewClient(overrides.CloudAPIURL, yAuthVir.AuthToken, httpapi.ReqTimeout(10*time.Second))
 
-	cpCl, err := publicapi.NewControlPlaneClientSet(cfg.DevOverrides().PublicAPIURL, yAuthVir.AuthToken)
-	if err != nil {
-		return CloudClusterOutputs{}, fmt.Errorf("unable to create public API client: %v", err)
-	}
+	cpCl := publicapi.NewCloudClientSet(cfg.DevOverrides().PublicAPIURL, yAuthVir.AuthToken)
 	if clusterIDOrName == "prompt" {
 		return PromptCloudClusterProfile(ctx, yAuthVir, cl, cpCl)
 	}
@@ -618,7 +614,7 @@ func (o CloudClusterOutputs) FullName() string {
 // user. If their cloud account has only one cluster, a profile is created for
 // it automatically. This returns ErrNoCloudClusters if the user has no cloud
 // clusters.
-func PromptCloudClusterProfile(ctx context.Context, yAuth *config.RpkCloudAuth, cl *cloudapi.Client, cpCl *publicapi.ControlPlaneClientSet) (CloudClusterOutputs, error) {
+func PromptCloudClusterProfile(ctx context.Context, yAuth *config.RpkCloudAuth, cl *cloudapi.Client, cpCl *publicapi.CloudClientSet) (CloudClusterOutputs, error) {
 	org, nss, vcs, cs, err := cl.OrgNamespacesClusters(ctx)
 	if err != nil {
 		return CloudClusterOutputs{}, err
