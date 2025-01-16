@@ -489,7 +489,7 @@ configuration::configuration()
       "cannot change. When the total size of cached requests reaches the set "
       "limit, back pressure is applied to throttle producers.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
-      5_MiB,
+      512_KiB,
       {.min = 0, .max = 100_MiB})
   , enable_usage(
       *this,
