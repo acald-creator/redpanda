@@ -312,6 +312,11 @@ def read_incremental_topic_update_serde(rdr: Reader):
                 rdr.read_optional(read_leaders_preference),
                 'iceberg_delete': rdr.read_optional(Reader.read_bool),
             }
+        if version >= 8:
+            incr_obj |= {
+                'iceberg_partition_spec':
+                rdr.read_optional(Reader.read_string),
+            }
 
         return incr_obj
 

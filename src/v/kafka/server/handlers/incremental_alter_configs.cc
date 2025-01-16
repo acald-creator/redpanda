@@ -374,6 +374,11 @@ create_topic_properties_update(
                   update.properties.iceberg_delete, cfg.value, op);
                 continue;
             }
+            if (cfg.name == topic_property_iceberg_partition_spec) {
+                parse_and_set_optional(
+                  update.properties.iceberg_partition_spec, cfg.value, op);
+                continue;
+            }
 
         } catch (const validation_error& e) {
             vlog(
