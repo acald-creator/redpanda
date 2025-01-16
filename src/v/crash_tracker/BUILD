@@ -7,6 +7,7 @@ redpanda_cc_library(
         "logger.cc",
         "recorder.cc",
         "service.cc",
+        "types.cc",
     ],
     hdrs = [
         "limiter.h",

@@ -62,4 +62,12 @@ struct crash_tracker_metadata
     }
 };
 
+class crash_loop_limit_reached : public std::runtime_error {
+public:
+    explicit crash_loop_limit_reached()
+      : std::runtime_error("Crash loop detected, aborting startup.") {}
+};
+
+bool is_crash_loop_limit_reached(std::exception_ptr);
+
 } // namespace crash_tracker

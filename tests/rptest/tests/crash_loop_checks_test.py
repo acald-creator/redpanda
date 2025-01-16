@@ -22,7 +22,7 @@ class CrashLoopChecksTest(RedpandaTest):
 
     CRASH_LOOP_LOG = [
         "Crash loop detected. Too many consecutive crashes.*",
-        ".*Failure during startup: std::runtime_error \(Crash loop detected, aborting startup.\).*"
+        ".*Failure during startup: crash_tracker::crash_loop_limit_reached \(Crash loop detected, aborting startup.\).*"
     ]
 
     # main - application.cc:348 - Failure during startup: std::__1::system_error (error C-Ares:4, unreachable_host.com: Not found)

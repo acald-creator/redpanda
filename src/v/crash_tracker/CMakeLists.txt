@@ -5,6 +5,7 @@ v_cc_library(
     logger.cc
     recorder.cc
     service.cc
+    types.cc
   DEPS
     Seastar::seastar
     v::base
