@@ -13,12 +13,14 @@
 
 #include "config/node_config.h"
 #include "crash_tracker/logger.h"
+#include "crash_tracker/types.h"
 #include "model/timestamp.h"
 #include "random/generators.h"
 
 #include <seastar/core/file.hh>
 #include <seastar/core/seastar.hh>
 #include <seastar/core/sleep.hh>
+#include <seastar/util/print_safe.hh>
 
 #include <chrono>
 
@@ -73,13 +75,64 @@ ss::future<> recorder::start() {
     co_await _writer.initialize(*crash_file_name);
 }
 
-ss::future<> recorder::stop() {
-    std::unique_lock<ss::util::spinlock> g(_writer_lock, std::try_to_lock);
-    vassert(
-      g.owns_lock(),
-      "stop() runs after all previous calls have completed, so we must have "
-      "been able to take the _writer_lock");
-    co_await _writer.release();
+namespace {
+
+void record_backtrace(crash_description& cd) {
+    size_t pos = 0;
+    ss::backtrace([&cd, &pos](ss::frame f) {
+        if (pos >= cd.stacktrace.size()) {
+            return; // Prevent buffer overflow
+        }
+
+        const bool first = pos == 0;
+        auto result = fmt::format_to_n(
+          cd.stacktrace.begin() + pos,
+          cd.stacktrace.size() - pos,
+          "{}{:#x}",
+          first ? "" : " ",
+          f.addr);
+
+        pos += result.size;
+    });
 }
+
+void print_skipping() {
+    constexpr static std::string_view skipping
+      = "Skipping recording crash reason to crash file.\n";
+    ss::print_safe(skipping.data(), skipping.size());
+}
+
+} // namespace
+
+void recorder::record_crash_exception(std::exception_ptr eptr) {
+    if (is_crash_loop_limit_reached(eptr)) {
+        // We specifically do not want to record crash_loop_limit_reached errors
+        // as crashes because they are not informative and would build up
+        // garbage on disk and would force to expire earlier useful crash logs.
+        return;
+    }
+
+    auto* cd_opt = _writer.fill();
+    if (!cd_opt) {
+        // The writer has already been consumed by another crash
+        print_skipping();
+        return;
+    }
+    auto& cd = *cd_opt;
+
+    record_backtrace(cd);
+    cd.type = crash_type::startup_exception;
+
+    auto& format_buf = cd.crash_message;
+    fmt::format_to_n(
+      format_buf.begin(),
+      format_buf.size(),
+      "Failure during startup: {}",
+      eptr);
+
+    _writer.write();
+}
+
+ss::future<> recorder::stop() { co_await _writer.release(); }
 
 } // namespace crash_tracker
