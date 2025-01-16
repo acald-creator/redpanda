@@ -258,6 +258,19 @@ record_multiplexer::end_of_stream() {
         std::move(
           files.begin(), files.end(), std::back_inserter(_result->data_files));
     }
+    if (_invalid_record_writer) {
+        auto writer = std::move(_invalid_record_writer);
+        auto res = co_await std::move(*writer).finish();
+        if (res.has_error()) {
+            _error = res.error();
+        } else {
+            auto& files = res.value();
+            std::move(
+              files.begin(),
+              files.end(),
+              std::back_inserter(_result->dlq_files));
+        }
+    }
     if (_error) {
         co_return *_error;
     }
@@ -295,7 +308,29 @@ record_multiplexer::handle_invalid_record(
             }
         }
 
-        _invalid_record_writer = true;
+        auto table_id = table_id_provider::dlq_table_id(_ntp.tp.topic);
+        auto load_res = co_await _schema_mgr.get_table_info(table_id);
+        if (load_res.has_error()) {
+            auto e = load_res.error();
+            switch (e) {
+            case schema_manager::errc::not_supported:
+            case schema_manager::errc::failed:
+                vlog(
+                  _log.warn,
+                  "Error getting table info for record {}: {}",
+                  offset,
+                  load_res.error());
+                [[fallthrough]];
+            case schema_manager::errc::shutting_down:
+                co_return writer_error::parquet_conversion_error;
+            }
+        }
+
+        _invalid_record_writer = std::make_unique<partitioning_writer>(
+          *_writer_factory,
+          load_res.value().schema.schema_id,
+          key_value_translator{}.build_type(std::nullopt).type,
+          std::move(load_res.value().partition_spec));
     }
 
     co_return std::nullopt;
