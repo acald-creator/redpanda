@@ -165,7 +165,20 @@ rm_stm::maybe_create_producer(model::producer_identity pid) {
     // as it is memory friendly.
     auto it = _producers.find(pid.get_id());
     if (it != _producers.end()) {
-        return std::make_pair(it->second, producer_previously_known::yes);
+        // Check if the producer is evicted and pending cleanup, in which case
+        // remove it right away.
+        const auto& producer = it->second;
+        if (producer->is_evicted()) {
+            vlog(
+              _ctx_log.info,
+              "Removing evicted producer: {} and replacing it with a new "
+              "producer for {}",
+              producer,
+              pid);
+            _producers.erase(it);
+        } else {
+            return std::make_pair(producer, producer_previously_known::yes);
+        }
     }
     auto producer = ss::make_lw_shared<producer_state>(
       _ctx_log, pid, _raft->group(), [pid, this] {
@@ -190,7 +203,7 @@ ss::future<> rm_stm::cleanup_evicted_producers() {
         auto it = _producers.find(pid.get_id());
         if (it == _producers.end()) {
             vlog(
-              _ctx_log.error,
+              _ctx_log.warn,
               "No producer state found for pid: {}, skipping cleanup",
               pid);
             continue;
