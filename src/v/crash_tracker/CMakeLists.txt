@@ -3,6 +3,7 @@ v_cc_library(
   SRCS
     limiter.cc
     logger.cc
+    prepared_writer.cc
     recorder.cc
     service.cc
     types.cc
