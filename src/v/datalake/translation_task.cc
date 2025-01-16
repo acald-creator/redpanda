@@ -34,6 +34,29 @@ translation_task::errc map_error_code(cloud_data_io::errc errc) {
     }
 }
 
+ss::future<checked<remote_path, translation_task::errc>> execute_single_upload(
+  cloud_data_io& _cloud_io,
+  const local_file_metadata& lf_meta,
+  const remote_path& remote_path_prefix,
+  retry_chain_node& parent_rcn,
+  lazy_abort_source& lazy_as) {
+    auto remote_path = calculate_remote_path(lf_meta.path, remote_path_prefix);
+    auto result = co_await _cloud_io.upload_data_file(
+      lf_meta, remote_path, parent_rcn, lazy_as);
+    if (result.has_error()) {
+        vlog(
+          datalake_log.warn,
+          "error uploading file {} to {} - {}",
+          lf_meta,
+          remote_path,
+          result.error());
+
+        co_return map_error_code(result.error());
+    }
+
+    co_return remote_path;
+}
+
 ss::future<checked<std::nullopt_t, translation_task::errc>>
 delete_local_data_files(
   const chunked_vector<partitioning_writer::partitioned_file>& files) {
@@ -119,7 +142,7 @@ translation_task::translate(
     // TODO: parallelize uploads
     for (auto& file : write_result.data_files) {
         auto r = co_await execute_single_upload(
-          file.local_file, remote_path_prefix, rcn, lazy_as);
+          *_cloud_io, file.local_file, remote_path_prefix, rcn, lazy_as);
         if (r.has_error()) {
             vlog(
               datalake_log.warn,
@@ -196,28 +219,6 @@ translation_task::translate(
     }
 
     co_return ret;
-}
-ss::future<checked<remote_path, translation_task::errc>>
-translation_task::execute_single_upload(
-  const local_file_metadata& lf_meta,
-  const remote_path& remote_path_prefix,
-  retry_chain_node& parent_rcn,
-  lazy_abort_source& lazy_as) {
-    auto remote_path = calculate_remote_path(lf_meta.path, remote_path_prefix);
-    auto result = co_await _cloud_io->upload_data_file(
-      lf_meta, remote_path, parent_rcn, lazy_as);
-    if (result.has_error()) {
-        vlog(
-          datalake_log.warn,
-          "error uploading file {} to {} - {}",
-          lf_meta,
-          remote_path,
-          result.error());
-
-        co_return map_error_code(result.error());
-    }
-
-    co_return remote_path;
 }
 
 std::ostream& operator<<(std::ostream& o, translation_task::errc ec) {
