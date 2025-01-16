@@ -3793,6 +3793,15 @@ configuration::configuration()
       "the topic.",
       {.needs_restart = needs_restart::no, .visibility = visibility::user},
       true)
+  , iceberg_default_partition_spec(
+      *this,
+      "iceberg_default_partition_spec",
+      "Default value for the redpanda.iceberg.partition.spec topic property "
+      "that determines the partition spec for the Iceberg table corresponding "
+      "to the topic.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::user},
+      "(hour(redpanda.timestamp))",
+      &validate_non_empty_string_opt)
   , development_enable_cloud_topics(
       *this,
       "development_enable_cloud_topics",
