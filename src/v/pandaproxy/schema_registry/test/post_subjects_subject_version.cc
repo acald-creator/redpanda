@@ -17,6 +17,7 @@
 
 #include <seastar/util/bool_class.hh>
 
+#include <limits>
 #include <optional>
 
 namespace pp = pandaproxy;
@@ -791,4 +792,70 @@ FIXTURE_TEST(
     BOOST_REQUIRE_EQUAL(
       res.headers.at(boost::beast::http::field::content_type),
       to_header_value(ppj::serialization_format::schema_registry_v1_json));
+}
+FIXTURE_TEST(
+  schema_registry_post_subjects_version_exhausted, pandaproxy_test_fixture) {
+    const auto simple_req_first = request{
+      pps::canonical_schema{
+        pps::subject{"simple-value"},
+        pps::canonical_schema_definition(
+          R"({
+"namespace": "com.redpanda",
+  "type": "record",
+  "name": "employee",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string"
+    }
+]
+  })",
+          pps::schema_type::avro)},
+      std::nullopt,
+      pps::schema_version{std::numeric_limits<int>::max()}};
+
+    const auto simple_req_second = request{
+      pps::canonical_schema{
+        pps::subject{"simple-value"},
+        pps::canonical_schema_definition(
+          R"({
+"namespace": "com.redpanda",
+  "type": "record",
+  "name": "employee",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "id2",
+      "type": "string",
+      "default": ""
+    }
+]
+  })",
+          pps::schema_type::avro)},
+      std::nullopt,
+      pps::schema_version{0}};
+    info("Connecting client");
+    auto client = make_schema_reg_client();
+    info("Post simple schema first (expect schema_id=1)");
+    auto res = post_schema(
+      client,
+      simple_req_first.schema.sub(),
+      ppj::rjson_serialize_str(simple_req_first));
+    BOOST_REQUIRE_EQUAL(res.body, R"({"id":1})");
+    BOOST_REQUIRE_EQUAL(
+      res.headers.at(boost::beast::http::field::content_type),
+      to_header_value(ppj::serialization_format::schema_registry_v1_json));
+
+    info("Post simple schema second (expect error)");
+    res = post_schema(
+      client,
+      simple_req_second.schema.sub(),
+      ppj::rjson_serialize_str(simple_req_second));
+    BOOST_REQUIRE_EQUAL(
+      res.headers.result(), boost::beast::http::status::internal_server_error);
+    BOOST_REQUIRE(std::string_view(res.body).starts_with(
+      R"({"error_code":500,"message":")"));
 }
