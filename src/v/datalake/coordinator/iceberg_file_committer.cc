@@ -95,6 +95,106 @@ get_iceberg_committed_offset(const iceberg::table_metadata& table) {
     }
     return std::nullopt;
 }
+
+checked<iceberg::struct_value, file_committer::errc> build_partition_key_struct(
+  const model::topic& topic,
+  const iceberg::table_metadata& table,
+  const data_file& f,
+  const iceberg::schema& schema) {
+    auto pspec_id = iceberg::partition_spec::id_t{f.partition_spec_id};
+    auto partition_spec = table.get_partition_spec(pspec_id);
+    if (!partition_spec) {
+        vlog(
+          datalake_log.error,
+          "can't find partition spec {} in table for topic {}",
+          pspec_id,
+          topic);
+        return file_committer::errc::failed;
+    }
+
+    if (partition_spec->fields.size() != f.partition_key.size()) {
+        vlog(
+          datalake_log.error,
+          "[topic: {}, file: {}] partition key size {} doesn't "
+          "match spec size {} (spec id: {})",
+          topic,
+          f.remote_path,
+          f.partition_key.size(),
+          partition_spec->fields.size(),
+          pspec_id);
+        return file_committer::errc::failed;
+    }
+
+    auto key_type = iceberg::partition_key_type::create(
+      *partition_spec, schema);
+
+    iceberg::struct_value pk;
+
+    for (size_t i = 0; i < partition_spec->fields.size(); ++i) {
+        const auto& field_type = key_type.type.fields.at(i);
+        const auto& field_bytes = f.partition_key.at(i);
+        if (field_bytes) {
+            try {
+                pk.fields.push_back(iceberg::value_from_bytes(
+                  field_type->type, field_bytes.value()));
+            } catch (const std::invalid_argument& e) {
+                vlog(
+                  datalake_log.error,
+                  "[topic: {}, file: {}] failed to parse "
+                  "partition key field {} (type: {}): {}",
+                  topic,
+                  f.remote_path,
+                  i,
+                  field_type->type,
+                  e);
+                return file_committer::errc::failed;
+            }
+        } else {
+            pk.fields.push_back(std::nullopt);
+        }
+    }
+
+    return pk;
+}
+
+checked<iceberg::struct_value, file_committer::errc> build_partition_key_struct(
+  const model::topic& topic,
+  const iceberg::table_metadata& table,
+  const data_file& f) {
+    if (f.table_schema_id < 0) {
+        // File created by a legacy Redpanda version that only
+        // supported hourly partitioning, the partition key value is
+        // in the hour_deprecated field.
+        iceberg::struct_value pk;
+        pk.fields.emplace_back(iceberg::int_value(f.hour_deprecated));
+        return pk;
+    } else {
+        auto schema = table.get_schema(
+          iceberg::schema::id_t{f.table_schema_id});
+        if (!schema) {
+            vlog(
+              datalake_log.error,
+              "can't find schema {} in table for topic {}",
+              f.table_schema_id,
+              topic);
+            return file_committer::errc::failed;
+        }
+
+        return build_partition_key_struct(topic, table, f, *schema);
+    }
+}
+
+checked<iceberg::partition_key, file_committer::errc> build_partition_key(
+  const model::topic& topic,
+  const iceberg::table_metadata& table,
+  const data_file& f) {
+    auto pk_res = build_partition_key_struct(topic, table, f);
+    if (pk_res.has_error()) {
+        return pk_res.error();
+    }
+    return iceberg::partition_key{
+      std::make_unique<iceberg::struct_value>(std::move(pk_res.value()))};
+}
 } // namespace
 
 ss::future<
@@ -180,77 +280,9 @@ iceberg_file_committer::commit_topic_files_to_catalog(
               new_committed_offset,
               std::make_optional<model::offset>(e.added_pending_at));
             for (const auto& f : e.data.files) {
-                auto pk = std::make_unique<iceberg::struct_value>();
-                if (f.table_schema_id >= 0) {
-                    auto schema_id = iceberg::schema::id_t{f.table_schema_id};
-                    auto schema = table.get_schema(schema_id);
-                    if (!schema) {
-                        vlog(
-                          datalake_log.error,
-                          "can't find schema {} in table for topic {}",
-                          schema_id,
-                          topic);
-                        co_return errc::failed;
-                    }
-
-                    auto pspec_id = iceberg::partition_spec::id_t{
-                      f.partition_spec_id};
-                    auto partition_spec = table.get_partition_spec(pspec_id);
-                    if (!partition_spec) {
-                        vlog(
-                          datalake_log.error,
-                          "can't find partition spec {} in table for topic {}",
-                          pspec_id,
-                          topic);
-                        co_return errc::failed;
-                    }
-
-                    if (
-                      partition_spec->fields.size() != f.partition_key.size()) {
-                        vlog(
-                          datalake_log.error,
-                          "[topic: {}, file: {}] partition key size {} doesn't "
-                          "match spec size {} (spec id: {})",
-                          topic,
-                          f.remote_path,
-                          f.partition_key.size(),
-                          partition_spec->fields.size(),
-                          pspec_id);
-                        co_return errc::failed;
-                    }
-
-                    auto key_type = iceberg::partition_key_type::create(
-                      *partition_spec, *schema);
-
-                    for (size_t i = 0; i < partition_spec->fields.size(); ++i) {
-                        const auto& field_type = key_type.type.fields.at(i);
-                        const auto& field_bytes = f.partition_key.at(i);
-                        if (field_bytes) {
-                            try {
-                                pk->fields.push_back(iceberg::value_from_bytes(
-                                  field_type->type, field_bytes.value()));
-                            } catch (const std::invalid_argument& e) {
-                                vlog(
-                                  datalake_log.error,
-                                  "[topic: {}, file: {}] failed to parse "
-                                  "partition key field {} (type: {}): {}",
-                                  topic,
-                                  f.remote_path,
-                                  i,
-                                  field_type->type,
-                                  e);
-                                co_return errc::failed;
-                            }
-                        } else {
-                            pk->fields.push_back(std::nullopt);
-                        }
-                    }
-                } else {
-                    // File created by a legacy Redpanda version that only
-                    // supported hourly partitioning, the partition key value is
-                    // in the hour_deprecated field.
-                    pk->fields.emplace_back(
-                      iceberg::int_value{f.hour_deprecated});
+                auto pk = build_partition_key(topic, table, f);
+                if (pk.has_error()) {
+                    co_return pk.error();
                 }
 
                 // TODO: pass schema_id and pspec_id to merge_append_action
@@ -260,7 +292,7 @@ iceberg_file_committer::commit_topic_files_to_catalog(
                   .content_type = iceberg::data_file_content_type::data,
                   .file_path = io_.to_uri(std::filesystem::path(f.remote_path)),
                   .file_format = iceberg::data_file_format::parquet,
-                  .partition = iceberg::partition_key{std::move(pk)},
+                  .partition = std::move(pk.value()),
                   .record_count = f.row_count,
                   .file_size_bytes = f.file_size_bytes,
                 });
