@@ -316,6 +316,19 @@ private:
     // be evicted when the lock is held.
     mutex _op_lock{"producer_state::_op_lock"};
     bool _evicted = false;
+
+    // note: this eviction hook was originally used as a stop gap when the
+    // transaction related state was still a part of rm_stm (during the port to
+    // producer_state). The port was done across two releases with idempotency
+    // related state in first pass and the transactions related state in the
+    // second pass. While the port was unfinished the ownership of state was
+    // spread between the producer_state and rm_stm
+    // Now that the port is complete and the entire producer_state is self
+    // contained, we no longer need this hook and the state can be owned fully
+    // by the producer manager.
+    //
+    // TODO: remove the hook and make producer_state_manager own the
+    // producer_state with rm_stm holding a reference/ptr to it.
     ss::noncopyable_function<void(model::producer_identity)>
       _post_eviction_hook;
     // Used to implement force eviction via admin APIs for forcing an eviction
