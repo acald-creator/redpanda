@@ -10,13 +10,14 @@
 
 #pragma once
 
+#include "base/outcome.h"
 #include "iceberg/unresolved_partition_spec.h"
 
 namespace datalake {
 
 // Parse unresolved_partition_spec from a spark-like DDL expression string
 // (ex.: "(hour(redpanda.timestamp), other_field)").
-std::optional<iceberg::unresolved_partition_spec>
+checked<iceberg::unresolved_partition_spec, ss::sstring>
 parse_partition_spec(const std::string_view&);
 
 } // namespace datalake

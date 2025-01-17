@@ -18,13 +18,13 @@ using iceberg::unresolved_partition_spec;
 TEST(PartitionSpecParserTest, TestParse) {
     {
         auto res = parse_partition_spec("()");
-        ASSERT_TRUE(res);
+        ASSERT_FALSE(res.has_error()) << res.error();
         ASSERT_EQ(res.value(), unresolved_partition_spec{});
     }
 
     {
         auto res = parse_partition_spec("(foo)");
-        ASSERT_TRUE(res);
+        ASSERT_FALSE(res.has_error()) << res.error();
         auto expected = chunked_vector<unresolved_partition_spec::field>{
           unresolved_partition_spec::field{
             .source_name = {"foo"},
@@ -38,7 +38,7 @@ TEST(PartitionSpecParserTest, TestParse) {
 
     {
         auto res = parse_partition_spec(" (foo.bar, baz ) ");
-        ASSERT_TRUE(res);
+        ASSERT_FALSE(res.has_error()) << res.error();
         auto expected = chunked_vector<unresolved_partition_spec::field>{
           unresolved_partition_spec::field{
             .source_name = {"foo", "bar"},
@@ -57,7 +57,7 @@ TEST(PartitionSpecParserTest, TestParse) {
     {
         auto res = parse_partition_spec(
           " (hour(redpanda.timestamp), day(my_ts) as my_day )");
-        ASSERT_TRUE(res);
+        ASSERT_FALSE(res.has_error()) << res.error();
         auto expected = chunked_vector<unresolved_partition_spec::field>{
           unresolved_partition_spec::field{
             .source_name = {"redpanda", "timestamp"},

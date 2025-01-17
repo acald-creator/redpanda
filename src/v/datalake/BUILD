@@ -211,6 +211,7 @@ redpanda_cc_library(
     include_prefix = "datalake",
     visibility = ["//visibility:public"],
     deps = [
+        "//src/v/base",
         "//src/v/iceberg:unresolved_partition_spec",
     ],
 )
