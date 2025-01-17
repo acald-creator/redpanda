@@ -181,7 +181,7 @@ rm_stm::maybe_create_producer(model::producer_identity pid) {
         }
     }
     auto producer = ss::make_lw_shared<producer_state>(
-      _ctx_log, pid, _raft->group(), [pid, this] {
+      _ctx_log, pid, _raft->group(), [this](model::producer_identity pid) {
           cleanup_producer_state(pid);
       });
     try {
@@ -1853,7 +1853,7 @@ rm_stm::apply_local_snapshot(raft::stm_snapshot_header hdr, iobuf&& tx_ss_buf) {
         auto pid = entry.id;
         auto producer = ss::make_lw_shared<producer_state>(
           _ctx_log,
-          [pid, this] { cleanup_producer_state(pid); },
+          [this](model::producer_identity pid) { cleanup_producer_state(pid); },
           std::move(entry));
         if (producer->has_transaction_in_progress()) {
             transactional_producers.push_back(producer);

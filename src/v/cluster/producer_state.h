@@ -164,7 +164,8 @@ public:
       prefix_logger& logger,
       model::producer_identity id,
       raft::group_id group,
-      ss::noncopyable_function<void()> post_eviction_hook)
+      ss::noncopyable_function<void(model::producer_identity)>
+        post_eviction_hook)
       : _logger(logger)
       , _id(id)
       , _group(group)
@@ -172,7 +173,8 @@ public:
       , _post_eviction_hook(std::move(post_eviction_hook)) {}
     producer_state(
       prefix_logger&,
-      ss::noncopyable_function<void()> post_eviction_hook,
+      ss::noncopyable_function<void(model::producer_identity)>
+        post_eviction_hook,
       producer_state_snapshot) noexcept;
 
     producer_state(const producer_state&) = delete;
@@ -314,7 +316,8 @@ private:
     // be evicted when the lock is held.
     mutex _op_lock{"producer_state::_op_lock"};
     bool _evicted = false;
-    ss::noncopyable_function<void()> _post_eviction_hook;
+    ss::noncopyable_function<void(model::producer_identity)>
+      _post_eviction_hook;
     // Used to implement force eviction via admin APIs for forcing an eviction
     // of this producer.
     bool _force_transaction_expiry{false};
