@@ -116,16 +116,19 @@ ss::future<> limiter::check_for_crash_loop(ss::abort_source& as) const {
                              || tracking_reset;
 
         if (!ok_to_proceed) {
+            auto crashes = co_await _recorder.get_recorded_crashes();
             vlog(
               ctlog.error,
               "Crash loop detected. Too many consecutive crashes {}, exceeded "
               "{} configured value {}. To recover Redpanda from this state, "
               "manually remove file at path {}. Crash loop automatically "
-              "resets 1h after last crash or with node configuration changes.",
+              "resets 1h after last crash or with node configuration changes. "
+              "{}",
               crash_md.crash_count,
               config::node().crash_loop_limit.name(),
               limit.value(),
-              file_path);
+              file_path,
+              impl::describe_crashes(crashes));
 
             const auto crash_loop_sleep_val
               = config::node().crash_loop_sleep_sec.value();
