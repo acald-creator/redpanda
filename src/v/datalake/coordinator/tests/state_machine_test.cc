@@ -37,6 +37,10 @@ struct coordinator_stm_fixture : stm_raft_fixture<stm> {
         return config::mock_binding(1s);
     }
 
+    config::binding<ss::sstring> default_partition_spec() const {
+        return config::mock_binding<ss::sstring>("(hour(redpanda.timestamp))");
+    }
+
     stm_shptrs_t create_stms(
       state_machine_manager_builder& builder,
       raft_node_instance& node) override {
@@ -59,7 +63,8 @@ struct coordinator_stm_fixture : stm_raft_fixture<stm> {
                 },
                 file_committer,
                 snapshot_remover,
-                commit_interval());
+                commit_interval(),
+                default_partition_spec());
             coordinators[node.get_vnode()]->start();
             return ss::now();
         });
