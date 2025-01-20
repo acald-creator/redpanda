@@ -45,7 +45,6 @@ redpanda_cc_library(
         "//src/v/datalake:record_schema_resolver",
         "//src/v/datalake:record_translator",
         "//src/v/datalake:schema_identifier",
-        "//src/v/datalake:table_definition",
         "//src/v/datalake:table_id_provider",
         "//src/v/datalake:types",
         "//src/v/ssx:future_util",

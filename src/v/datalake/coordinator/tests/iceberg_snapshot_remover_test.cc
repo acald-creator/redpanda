@@ -12,6 +12,7 @@
 #include "cloud_storage/tests/s3_imposter.h"
 #include "datalake/coordinator/iceberg_snapshot_remover.h"
 #include "datalake/table_definition.h"
+#include "datalake/tests/test_utils.h"
 #include "iceberg/filesystem_catalog.h"
 #include "iceberg/remove_snapshots_action.h"
 #include "iceberg/table_identifier.h"

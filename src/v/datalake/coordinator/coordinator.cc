@@ -17,7 +17,6 @@
 #include "datalake/logger.h"
 #include "datalake/partition_spec_parser.h"
 #include "datalake/record_translator.h"
-#include "datalake/table_definition.h"
 #include "datalake/table_id_provider.h"
 #include "model/fundamental.h"
 #include "ssx/future-util.h"
