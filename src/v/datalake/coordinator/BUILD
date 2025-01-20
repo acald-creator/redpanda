@@ -41,6 +41,7 @@ redpanda_cc_library(
         "//src/v/base",
         "//src/v/datalake:catalog_schema_manager",
         "//src/v/datalake:logger",
+        "//src/v/datalake:partition_spec_parser",
         "//src/v/datalake:record_schema_resolver",
         "//src/v/datalake:record_translator",
         "//src/v/datalake:schema_identifier",

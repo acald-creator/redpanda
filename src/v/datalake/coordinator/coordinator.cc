@@ -15,6 +15,7 @@
 #include "datalake/catalog_schema_manager.h"
 #include "datalake/coordinator/state_update.h"
 #include "datalake/logger.h"
+#include "datalake/partition_spec_parser.h"
 #include "datalake/record_translator.h"
 #include "datalake/table_definition.h"
 #include "datalake/table_id_provider.h"
@@ -256,6 +257,9 @@ struct coordinator::table_schema_provider {
     virtual ss::future<checked<iceberg::struct_type, coordinator::errc>>
       get_record_type(record_schema_components) const = 0;
 
+    virtual ss::sstring get_partition_spec(const cluster::topic_metadata&) const
+      = 0;
+
     virtual ~table_schema_provider() = default;
 };
 
@@ -284,6 +288,35 @@ coordinator::do_ensure_table_exists(
     }
 
     // TODO: add mutex to protect against the thundering herd problem
+
+    auto topic_md = topic_table_.get_topic_metadata_ref(
+      model::topic_namespace_view{model::kafka_namespace, topic});
+    if (!topic_md || topic_md->get().get_revision() != topic_revision) {
+        vlog(
+          datalake_log.debug,
+          "Rejecting {} for {} rev {}, topic table revision {}",
+          method_name,
+          topic,
+          topic_revision,
+          topic_md ? std::optional{topic_md->get().get_revision()}
+                   : std::nullopt);
+        co_return errc::revision_mismatch;
+    }
+
+    auto partition_spec_str = schema_provider.get_partition_spec(
+      topic_md->get());
+    auto partition_spec = parse_partition_spec(partition_spec_str);
+    if (!partition_spec.has_value()) {
+        vlog(
+          datalake_log.warn,
+          "{} failed, couldn't parse partition spec {} for {} rev {}: {}",
+          method_name,
+          partition_spec_str,
+          topic,
+          topic_revision,
+          partition_spec.error());
+        co_return errc::failed;
+    }
 
     topic_lifecycle_update update{
       .topic = topic,
@@ -327,7 +360,7 @@ coordinator::do_ensure_table_exists(
     }
 
     auto ensure_res = co_await schema_mgr_.ensure_table_schema(
-      table_id, record_type.value(), hour_partition_spec());
+      table_id, record_type.value(), partition_spec.value());
     if (ensure_res.has_error()) {
         switch (ensure_res.error()) {
         case schema_manager::errc::not_supported:
@@ -368,6 +401,13 @@ struct coordinator::main_table_schema_provider
         co_return std::move(record_type.type);
     }
 
+    ss::sstring
+    get_partition_spec(const cluster::topic_metadata& topic_md) const final {
+        return topic_md.get_configuration()
+          .properties.iceberg_partition_spec.value_or(
+            parent.default_partition_spec_());
+    }
+
     const coordinator& parent;
 };
 
@@ -386,6 +426,9 @@ coordinator::sync_ensure_table_exists(
 
 struct coordinator::dlq_table_schema_provider
   : public coordinator::table_schema_provider {
+    explicit dlq_table_schema_provider(coordinator& parent)
+      : parent(parent) {}
+
     iceberg::table_identifier
     get_table_id(const model::topic& topic) const final {
         return table_id_provider::dlq_table_id(topic);
@@ -395,6 +438,12 @@ struct coordinator::dlq_table_schema_provider
     get_record_type(record_schema_components) const final {
         co_return key_value_translator{}.build_type(std::nullopt).type;
     }
+
+    ss::sstring get_partition_spec(const cluster::topic_metadata&) const final {
+        return parent.default_partition_spec_();
+    }
+
+    const coordinator& parent;
 };
 
 ss::future<checked<std::nullopt_t, coordinator::errc>>
@@ -405,7 +454,7 @@ coordinator::sync_ensure_dlq_table_exists(
       topic_revision,
       record_schema_components{},
       "sync_ensure_dlq_table_exists",
-      dlq_table_schema_provider{});
+      dlq_table_schema_provider{*this});
 }
 
 ss::future<checked<std::nullopt_t, coordinator::errc>>

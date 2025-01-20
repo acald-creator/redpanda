@@ -128,9 +128,18 @@ struct coordinator_stm_fixture : stm_raft_fixture<stm> {
 
     model::topic_partition random_tp() const {
         return {
-          model::topic{"test"},
+          tp_ns.tp,
           model::partition_id(
             random_generators::get_int<int32_t>(0, max_partitions - 1))};
+    }
+
+    ss::future<> register_in_topic_table() {
+        auto topic_cfg = cluster::topic_configuration(
+          tp_ns.ns, tp_ns.tp, /*partition_count=*/1, /*replication_factor=*/1);
+        auto tt_res = co_await topic_table.apply(
+          cluster::create_topic_cmd{tp_ns, {topic_cfg, {}}},
+          model::offset{rev()});
+        ASSERT_EQ_CORO(tt_res, cluster::errc::success);
     }
 
     ss::future<
@@ -140,7 +149,8 @@ struct coordinator_stm_fixture : stm_raft_fixture<stm> {
     }
 
     static constexpr int32_t max_partitions = 5;
-    model::topic_partition tp{model::topic{"test"}, model::partition_id{0}};
+    model::topic_namespace tp_ns{model::kafka_namespace, model::topic{"test"}};
+    model::topic_partition tp{tp_ns.tp, model::partition_id{0}};
     model::revision_id rev{123};
     cluster::data_migrations::migrated_resources mr;
     cluster::topic_table topic_table{mr};
@@ -154,6 +164,7 @@ struct coordinator_stm_fixture : stm_raft_fixture<stm> {
 TEST_F_CORO(coordinator_stm_fixture, test_snapshots) {
     co_await initialize();
     co_await wait_for_leader(5s);
+    co_await register_in_topic_table();
 
     // populate some data until the state machine is snapshotted
     // a few times
@@ -231,7 +242,7 @@ TEST_F_CORO(coordinator_stm_fixture, test_snapshots) {
 
     for (int32_t pid = 0; pid < max_partitions; pid++) {
         auto committed_offsets = last_committed_offsets(
-          {model::topic{"test"}, model::partition_id{pid}});
+          {tp_ns.tp, model::partition_id{pid}});
         vlog(logger().info, "committed offsets: {}", committed_offsets);
         ASSERT_TRUE_CORO(std::equal(
           committed_offsets.begin() + 1,

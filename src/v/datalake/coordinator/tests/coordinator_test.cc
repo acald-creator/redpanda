@@ -248,6 +248,23 @@ public:
         raft::raft_fixture::TearDownAsync().get();
     }
 
+    void register_in_topic_tables(
+      const model::topic& topic, model::revision_id rev) {
+        auto topic_cfg = cluster::topic_configuration(
+          model::kafka_namespace, topic, 1, 1);
+        for (auto& crd : crds) {
+            auto tt_res = crd->topic_table
+                            .apply(
+                              cluster::create_topic_cmd{
+                                model::topic_namespace{
+                                  model::kafka_namespace, topic},
+                                {topic_cfg, {}}},
+                              model::offset{rev()})
+                            .get();
+            ASSERT_EQ(tt_res, cluster::errc::success);
+        }
+    }
+
     // Returns the coordinator on the current leader.
     using opt_ref = std::optional<std::reference_wrapper<coordinator_node>>;
     opt_ref leader_node() {
@@ -339,8 +356,10 @@ TEST_F(CoordinatorTest, TestAddFilesHappyPath) {
     const auto tp00 = tp(0, 0);
     const auto tp01 = tp(0, 1);
     const model::revision_id rev0{1};
+    register_in_topic_tables(tp00.topic, rev0);
     const auto tp10 = tp(1, 0);
     const model::revision_id rev1{2};
+    register_in_topic_tables(tp10.topic, rev1);
 
     leader.ensure_table(tp00.topic, rev0);
     pairs_t total_expected_00;
@@ -407,6 +426,7 @@ TEST_F(CoordinatorTest, TestLastAddedHappyPath) {
     const auto tp00 = tp(0, 0);
     const auto tp01 = tp(0, 1);
     const model::revision_id rev{1};
+    register_in_topic_tables(tp00.topic, rev);
     leader.ensure_table(tp00.topic, rev);
     pairs_t total_expected_00;
     for (const auto& v :
@@ -440,6 +460,7 @@ TEST_F(CoordinatorTest, TestNotLeader) {
     auto& non_leader = non_leader_opt->get();
     const auto tp00 = tp(0, 0);
     const model::revision_id rev{1};
+    register_in_topic_tables(tp00.topic, rev);
     leader_opt.value().get().ensure_table(tp00.topic, rev);
     pairs_t total_expected_00;
 
@@ -468,6 +489,7 @@ TEST_P(CoordinatorTestWithParams, TestConcurrentAddFiles) {
     }
     const auto tp00 = tp(0, 0);
     const model::revision_id rev0{1};
+    register_in_topic_tables(tp00.topic, rev0);
     bool done = false;
     std::vector<ss::future<>> adders;
     int fiber_id = 0;
@@ -576,6 +598,7 @@ TEST_F(CoordinatorLoopTest, TestCommitFilesHappyPath) {
     auto& leader = leader_opt->get();
     const auto tp00 = tp(0, 0);
     const model::revision_id rev0{1};
+    register_in_topic_tables(tp00.topic, rev0);
     leader.ensure_table(tp00.topic, rev0);
     auto add_res = leader.crd
                      .sync_add_files(tp00, rev0, make_pending_files({{0, 100}}))
@@ -606,6 +629,7 @@ TEST_F(CoordinatorLoopTest, TestCommitFilesNotLeader) {
     auto& leader = leader_opt->get();
     const auto tp00 = tp(0, 0);
     const model::revision_id rev0{1};
+    register_in_topic_tables(tp00.topic, rev0);
     leader.ensure_table(tp00.topic, rev0);
     auto add_res = leader.crd
                      .sync_add_files(tp00, rev0, make_pending_files({{0, 100}}))
@@ -687,6 +711,7 @@ TEST_F(CoordinatorSleepingLoopTest, TestQuickShutdownOnLeadershipChange) {
     for (int i = 0; i < 100; i++) {
         auto t = tp(i, 0);
         auto rev = model::revision_id{i};
+        register_in_topic_tables(t.topic, rev);
         leader.ensure_table(t.topic, rev);
         auto add_res = leader.crd
                          .sync_add_files(t, rev, make_pending_files({{0, 100}}))
