@@ -220,16 +220,23 @@ class DatalakeServices():
                              topic,
                              msg_count,
                              timeout=30,
-                             backoff_sec=5):
-        self.wait_for_iceberg_table("redpanda", topic, timeout, backoff_sec)
+                             backoff_sec=5,
+                             table_override=None):
+        table_name = topic
+        if table_override:
+            table_name = table_override
+
+        self.wait_for_iceberg_table("redpanda", table_name, timeout,
+                                    backoff_sec)
 
         def translation_done():
             counts = dict(
                 map(
                     lambda e:
-                    (e.engine_name(), e.count_table("redpanda", topic)),
+                    (e.engine_name(), e.count_table("redpanda", table_name)),
                     self.query_engines))
-            self.redpanda.logger.debug(f"Current counts: {counts}")
+            self.redpanda.logger.debug(
+                f"Current counts for {table_name}: {counts}")
             return all([c == msg_count for _, c in counts.items()])
 
         wait_until(
