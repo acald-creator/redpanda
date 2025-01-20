@@ -17,3 +17,5 @@ v_cc_library(
     v::hashing
     v::random
 )
+
+add_subdirectory(tests)

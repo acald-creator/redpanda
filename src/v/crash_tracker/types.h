@@ -18,6 +18,8 @@
 #include "serde/rw/envelope.h"
 #include "serde/rw/sstring.h"
 
+#include <ostream>
+
 namespace crash_tracker {
 
 enum class crash_type {
@@ -92,6 +94,8 @@ struct crash_description
         return std::tie(
           type, crash_time, crash_message, stacktrace, addition_info);
     }
+
+    friend std::ostream& operator<<(std::ostream&, const crash_description&);
 };
 
 struct crash_tracker_metadata
