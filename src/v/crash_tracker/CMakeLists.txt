@@ -9,6 +9,7 @@ v_cc_library(
     types.cc
   DEPS
     Seastar::seastar
+    v::config
     v::base
     v::bytes
     v::model
