@@ -40,7 +40,6 @@ using namespace std::chrono_literals;
 ss::future<chunked_vector<model::record_batch>>
 replicate_entries_stm::share_batches() {
     // one extra copy is needed for retries
-    auto u = co_await _share_mutex.get_units();
     chunked_vector<model::record_batch> batches;
     batches.reserve(_batches->size());
     co_await ssx::async_for_each(*_batches, [&batches](model::record_batch& b) {
