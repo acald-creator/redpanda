@@ -107,6 +107,8 @@ func loginAndEnsurePluginVersion(ctx context.Context, fs afero.Fs, cfg *config.C
 			return "", "", false, fmt.Errorf("unable to get latest installpack: %v", err)
 		}
 	} else {
+		// We can't use the PublicAPI client here as the Public API response
+		// does not include the Cluster's installpack version.
 		cluster, err := cl.Cluster(ctx, redpandaID)
 		if err != nil {
 			return "", "", false, fmt.Errorf("unable to request cluster details for %q: %w", redpandaID, err)
