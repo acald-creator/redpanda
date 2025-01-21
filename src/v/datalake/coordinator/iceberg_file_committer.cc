@@ -26,6 +26,8 @@
 #include "iceberg/values.h"
 #include "iceberg/values_bytes.h"
 
+#include <optional>
+
 namespace datalake::coordinator {
 namespace {
 
@@ -367,23 +369,39 @@ iceberg_file_committer::commit_topic_files_to_catalog(
     }
     auto topic_revision = tp_it->second.revision;
 
-    // Main table:
-    auto main_table_id = table_id_provider::table_id(topic);
-    auto main_table_res = co_await load_table(main_table_id);
-    if (main_table_res.has_error()) {
-        vlog(
-          datalake_log.warn,
-          "Error loading table {} for committing from topic {}",
-          main_table_id,
-          topic);
-        co_return main_table_res.error();
+    // Main table (may not exist if all records so far were invalid and the
+    // schema couldn't be determined):
+    std::optional<table_commit_builder> main_table_commit_builder;
+    {
+        auto main_table_id = table_id_provider::table_id(topic);
+        auto main_table_res = co_await catalog_.load_table(main_table_id);
+        if (main_table_res.has_error()) {
+            switch (main_table_res.error()) {
+            case iceberg::catalog::errc::not_found:
+                vlog(
+                  datalake_log.debug,
+                  "Main table {} not found for committing from topic {}",
+                  main_table_id,
+                  topic);
+                break;
+            default:
+                co_return log_and_convert_catalog_errc(
+                  main_table_res.error(),
+                  fmt::format(
+                    "Error loading table {} for committing from topic {}",
+                    main_table_id,
+                    topic));
+            }
+        } else {
+            auto main_table_commit_builder_res = table_commit_builder::create(
+              std::move(main_table_id), std::move(main_table_res.value()));
+            if (main_table_commit_builder_res.has_error()) {
+                co_return main_table_commit_builder_res.error();
+            }
+            main_table_commit_builder = std::move(
+              main_table_commit_builder_res.value());
+        }
     }
-    auto main_table_commit_builder_res = table_commit_builder::create(
-      std::move(main_table_id), std::move(main_table_res.value()));
-    if (main_table_commit_builder_res.has_error()) {
-        co_return main_table_commit_builder_res.error();
-    }
-    auto& main_table_commit_builder = main_table_commit_builder_res.value();
 
     // DLQ table (optional):
     std::optional<table_commit_builder> dlq_table_commit_builder;
@@ -447,10 +465,22 @@ iceberg_file_committer::commit_topic_files_to_catalog(
         for (const auto& e : p_state.pending_entries) {
             pending_commits[pid] = e.data.last_offset;
 
-            auto res = main_table_commit_builder.process_pending_entry(
-              topic, topic_revision, io_, e.added_pending_at, e.data.files);
-            if (res.has_error()) {
-                co_return res.error();
+            if (!e.data.files.empty()) {
+                if (!main_table_commit_builder) {
+                    vlog(
+                      datalake_log.error,
+                      "Pending files for topic {} revision {} but no main "
+                      "table",
+                      topic,
+                      topic_revision);
+                    co_return file_committer::errc::failed;
+                }
+
+                auto res = main_table_commit_builder->process_pending_entry(
+                  topic, topic_revision, io_, e.added_pending_at, e.data.files);
+                if (res.has_error()) {
+                    co_return res.error();
+                }
             }
 
             if (!e.data.dlq_files.empty()) {
@@ -510,12 +540,15 @@ iceberg_file_committer::commit_topic_files_to_catalog(
         }
     }
 
-    auto main_table_commit_res = co_await std::move(main_table_commit_builder)
-                                   .commit(
-                                     topic, topic_revision, catalog_, io_);
-    if (main_table_commit_res.has_error()) {
-        co_return main_table_commit_res.error();
+    if (main_table_commit_builder) {
+        auto main_table_commit_res
+          = co_await std::move(*main_table_commit_builder)
+              .commit(topic, topic_revision, catalog_, io_);
+        if (main_table_commit_res.has_error()) {
+            co_return main_table_commit_res.error();
+        }
     }
+
     co_return updates;
 }
 
