@@ -1051,6 +1051,107 @@ extend .google.protobuf.EnumValueOptions {
       normalize(schema, pps::protobuf_renderer_v2::yes), normalized);
 }
 
+SEASTAR_THREAD_TEST_CASE(test_protobuf_normalize_extension_ranges) {
+    const auto schema = R"(syntax = "proto2";
+
+message SimpleMessage {
+  optional int32 foo = 1;
+}
+message ExtendableMessage {
+  extensions 1 to 9;
+  extensions 11 to 99 [verification = UNVERIFIED];
+  extensions 111 to 222 [verification = DECLARATION];
+  extensions 333 to 444 [
+    declaration = {
+      number: 334,
+      full_name: ".some_int",
+      type: "int32",
+      repeated: true
+    }
+  ];
+  extensions 555 to 666 [
+    declaration = { full_name: ".some_other_int32", type: "int32", number: 555 },
+    declaration = { full_name: ".some_double", type: "double", number: 556, reserved: true },
+    declaration = { full_name: ".my_message", type: ".SimpleMessage", number: 557, reserved: true, repeated: false }
+  ];
+}
+extend ExtendableMessage {
+  optional int32 some_int = 3;
+}
+
+)";
+
+    const auto sanitized = R"(syntax = "proto2";
+
+message SimpleMessage {
+  optional int32 foo = 1;
+}
+message ExtendableMessage {
+  extensions 1 to 9;
+  extensions 11 to 99 [verification = UNVERIFIED];
+  extensions 111 to 222 [verification = DECLARATION];
+  extensions 333 to 444 [declaration = {number : 334 , full_name : ".some_int" , type : "int32" , repeated : true
+  }];
+  extensions 555 to 666 [
+    declaration = {full_name : ".some_other_int32" , type : "int32" , number : 555
+  },
+    declaration = {full_name : ".some_double" , type : "double" , number : 556 , reserved : true
+  },
+    declaration = {full_name : ".my_message" , type : ".SimpleMessage" , number : 557 , reserved : true , repeated : false
+  }
+  ];
+}
+extend ExtendableMessage {
+  optional int32 some_int = 3;
+}
+
+)";
+
+    const auto normalized = R"(syntax = "proto2";
+
+message SimpleMessage {
+  optional int32 foo = 1;
+}
+message ExtendableMessage {
+  extensions 1 to 9;
+  extensions 11 to 99 [verification = UNVERIFIED];
+  extensions 111 to 222 [verification = DECLARATION];
+  extensions 333 to 444 [declaration = {
+    full_name: ".some_int",
+    type: "int32",
+    number: 334,
+    repeated: true}];
+  extensions 555 to 666 [
+    declaration = {
+      full_name: ".some_other_int32",
+      type: "int32",
+      number: 555},
+    declaration = {
+      full_name: ".some_double",
+      type: "double",
+      number: 556,
+      reserved: true},
+    declaration = {
+      full_name: ".my_message",
+      type: ".SimpleMessage",
+      number: 557,
+      reserved: true,
+      repeated: false}
+  ];
+}
+extend .ExtendableMessage {
+  optional int32 some_int = 3;
+}
+
+)";
+
+    BOOST_CHECK_EQUAL(
+      sanitize(schema, pps::normalize::no, pps::protobuf_renderer_v2::yes),
+      sanitized);
+    BOOST_CHECK_EQUAL(
+      normalize(schema, pps::protobuf_renderer_v2::yes), normalized);
+}
+
 SEASTAR_THREAD_TEST_CASE(test_protobuf_sanitize_no_syntax) {
     BOOST_REQUIRE_EQUAL(
       sanitize(R"(

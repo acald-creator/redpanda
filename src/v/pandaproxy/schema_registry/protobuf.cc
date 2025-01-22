@@ -198,6 +198,20 @@ struct fmt::formatter<google::protobuf::FieldOptions::JSType>
         return ctx.out();
     }
 };
+template<>
+struct fmt::formatter<google::protobuf::ExtensionRangeOptions_VerificationState>
+  : indent_formatter {
+    auto format(
+      const google::protobuf::ExtensionRangeOptions_VerificationState& state,
+      format_context& ctx) const {
+        fmt::format_to(
+          ctx.out(),
+          "{}",
+          google::protobuf::ExtensionRangeOptions_VerificationState_Name(
+            state));
+        return ctx.out();
+    }
+};
 
 namespace pandaproxy::schema_registry {
 
@@ -945,6 +959,103 @@ struct protobuf_schema_definition::impl {
         }
     }
 
+    void render_extension_range(
+      std::ostream& os,
+      const pb::DescriptorProto_ExtensionRange& range,
+      int indent) const {
+        fmt::print(
+          os,
+          "{:{}}extensions {} to {}",
+          "",
+          indent,
+          range.start(),
+          range.end() - 1);
+
+        if (range.has_options()) {
+            const auto& options = range.options();
+            size_t count = [&options]() {
+                return static_cast<size_t>(options.declaration_size())
+                       + static_cast<size_t>(options.has_verification())
+                       + static_cast<size_t>(
+                         options.uninterpreted_option_size());
+            }();
+
+            bool first = true;
+            auto maybe_print_seperator = [&]() {
+                if (count > 1) {
+                    const auto prefix = first ? " [" : ",";
+                    fmt::print(os, "{}\n{:{}}", prefix, "", indent + 2);
+                    first = false;
+                } else if (first) {
+                    fmt::print(os, " [");
+                }
+            };
+
+            const int decl_indent = count > 1 ? indent + 2 : indent;
+            for (const auto& decl : options.declaration()) {
+                maybe_print_seperator();
+                render_declaration(os, decl, decl_indent);
+            }
+            if (options.has_verification()) {
+                maybe_print_seperator();
+                fmt::print(os, "verification = {}", options.verification());
+            }
+            auto uninterpreted_options = maybe_sorted_uninterpreted_options(
+              options.uninterpreted_option());
+            for (const auto& option : uninterpreted_options) {
+                maybe_print_seperator();
+                fmt::print(os, "{}", option);
+            }
+
+            if (count > 1 && !first) {
+                fmt::print(os, "\n{:{}}]", "", indent);
+            } else if (count == 1) {
+                fmt::print(os, "]");
+            }
+        }
+
+        fmt::print(os, ";\n");
+    }
+
+    void render_declaration(
+      std::ostream& os,
+      const pb::ExtensionRangeOptions_Declaration& decl,
+      int indent) const {
+        fmt::print(os, "declaration = {{");
+
+        // declarations need to have at least 'full_name' and 'type'
+        // set. This means that always "count >= 2".
+        bool first = true;
+        auto maybe_print_seperator = [&]() {
+            const auto prefix = first ? "" : ",";
+            fmt::print(os, "{}\n{:{}}", prefix, "", indent + 2);
+            first = false;
+        };
+
+        if (decl.has_full_name()) {
+            maybe_print_seperator();
+            fmt::print(os, "{}: \"{}\"", "full_name", decl.full_name());
+        }
+        if (decl.has_type()) {
+            maybe_print_seperator();
+            fmt::print(os, "{}: \"{}\"", "type", decl.type());
+        }
+        if (decl.has_number()) {
+            maybe_print_seperator();
+            fmt::print(os, "{}: {}", "number", decl.number());
+        }
+        if (decl.has_reserved()) {
+            maybe_print_seperator();
+            fmt::print(os, "{}: {}", "reserved", decl.reserved());
+        }
+        if (decl.has_repeated()) {
+            maybe_print_seperator();
+            fmt::print(os, "{}: {}", "repeated", decl.repeated());
+        }
+
+        fmt::print(os, "}}");
+    }
+
     // Render a message, including nested messages
     void render_nested(
       std::ostream& os,
@@ -1076,13 +1187,7 @@ struct protobuf_schema_definition::impl {
 
         // Render extension ranges
         for (const auto& range : message.extension_range()) {
-            fmt::print(
-              os,
-              "{:{}}extensions {} to {};\n",
-              "",
-              indent + 2,
-              range.start(),
-              range.end() - 1);
+            render_extension_range(os, range, indent + 2);
         }
 
         render_extensions(
