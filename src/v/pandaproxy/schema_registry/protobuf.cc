@@ -620,7 +620,23 @@ struct protobuf_schema_definition::impl {
         if (!from.has_options()) {
             return;
         }
-        to.mutable_options()->CopyFrom(from.options());
+        const auto& opts_from = from.options();
+        if (opts_from.uninterpreted_option_size() == 0) {
+            return;
+        }
+        const auto& uopts_from = opts_from.uninterpreted_option();
+
+        const auto is_custom_option = [](const pb::UninterpretedOption& opt) {
+            const auto& name = opt.name();
+            return std::ranges::any_of(name, [](const auto& np) {
+                return np.has_is_extension() && np.is_extension();
+            });
+        };
+        std::ranges::copy_if(
+          uopts_from,
+          RepeatedPtrFieldBackInserter(
+            to.mutable_options()->mutable_uninterpreted_option()),
+          is_custom_option);
     }
 
     void copy_uninterpreted_options(
