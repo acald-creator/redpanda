@@ -262,7 +262,7 @@ rp_test(
      topic_properties_test.cc
   LIBRARIES
     v::gtest_main
-    v::cluster
+    v::cluster_topic_properties
   ARGS "-- -c 1"
   LABELS cluster
 )

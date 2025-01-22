@@ -307,6 +307,12 @@ class DescribeTopicsTest(RedpandaTest):
                 value="",
                 doc_string="Partition spec of the corresponding Iceberg table."
             ),
+            "redpanda.iceberg.invalid.record.action":
+            ConfigProperty(
+                config_type="STRING",
+                value="dlq_table",
+                doc_string=
+                "Action to take when an invalid record is encountered."),
         }
 
         tp_spec = TopicSpec()
