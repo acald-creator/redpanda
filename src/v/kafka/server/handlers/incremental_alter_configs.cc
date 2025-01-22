@@ -376,7 +376,10 @@ create_topic_properties_update(
             }
             if (cfg.name == topic_property_iceberg_partition_spec) {
                 parse_and_set_optional(
-                  update.properties.iceberg_partition_spec, cfg.value, op);
+                  update.properties.iceberg_partition_spec,
+                  cfg.value,
+                  op,
+                  iceberg_partition_spec_validator{});
                 continue;
             }
 

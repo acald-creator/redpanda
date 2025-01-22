@@ -374,7 +374,8 @@ create_topic_properties_update(
                 parse_and_set_optional(
                   update.properties.iceberg_partition_spec,
                   cfg.value,
-                  kafka::config_resource_operation::set);
+                  kafka::config_resource_operation::set,
+                  iceberg_partition_spec_validator{});
                 continue;
             }
 
