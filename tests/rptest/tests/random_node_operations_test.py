@@ -71,7 +71,7 @@ class RandomNodeOperationsTest(PreallocNodesTest):
                     'storage-gc': 'warn',
                     'raft': 'debug',
                     'cluster': 'debug',
-                    'datalake': 'debug',
+                    'datalake': 'trace',
                 }),
             *args,
             **kwargs)
