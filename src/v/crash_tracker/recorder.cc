@@ -80,14 +80,14 @@ namespace {
 void record_backtrace(crash_description& cd) {
     size_t pos = 0;
     ss::backtrace([&cd, &pos](ss::frame f) {
-        if (pos >= cd.stacktrace.size()) {
+        if (pos >= cd.stacktrace.capacity()) {
             return; // Prevent buffer overflow
         }
 
         const bool first = pos == 0;
         auto result = fmt::format_to_n(
           cd.stacktrace.begin() + pos,
-          cd.stacktrace.size() - pos,
+          cd.stacktrace.capacity() - pos,
           "{}{:#x}",
           first ? "" : " ",
           f.addr);
@@ -126,7 +126,7 @@ void recorder::record_crash_exception(std::exception_ptr eptr) {
     auto& format_buf = cd.crash_message;
     fmt::format_to_n(
       format_buf.begin(),
-      format_buf.size(),
+      format_buf.capacity(),
       "Failure during startup: {}",
       eptr);
 
