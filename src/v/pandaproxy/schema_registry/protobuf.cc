@@ -671,6 +671,12 @@ struct protobuf_schema_definition::impl {
              boost::combine(from.extension(), *to.mutable_extension())) {
             copy_custom_options(extension_from, extension_to);
         }
+
+        // extentions ranges
+        for (auto&& [extension_from, extension_to] : boost::combine(
+               from.extension_range(), *to.mutable_extension_range())) {
+            copy_custom_options(extension_from, extension_to);
+        }
     }
 
     void copy_custom_options(
@@ -697,6 +703,12 @@ struct protobuf_schema_definition::impl {
     void copy_custom_options(
       const pb::FieldDescriptorProto& from,
       pb::FieldDescriptorProto& to) const {
+        do_copy_custom_options(from, to);
+    }
+
+    void copy_custom_options(
+      const pb::DescriptorProto_ExtensionRange& from,
+      pb::DescriptorProto_ExtensionRange& to) const {
         do_copy_custom_options(from, to);
     }
 

@@ -1054,6 +1054,8 @@ extend .google.protobuf.EnumValueOptions {
 SEASTAR_THREAD_TEST_CASE(test_protobuf_normalize_extension_ranges) {
     const auto schema = R"(syntax = "proto2";
 
+import "google/protobuf/descriptor.proto";
+
 message SimpleMessage {
   optional int32 foo = 1;
 }
@@ -1074,14 +1076,22 @@ message ExtendableMessage {
     declaration = { full_name: ".some_double", type: "double", number: 556, reserved: true },
     declaration = { full_name: ".my_message", type: ".SimpleMessage", number: 557, reserved: true, repeated: false }
   ];
+  extensions 777 [(my_range_option_b) = "some value", (my_range_option_a) = "some other value"];
 }
 extend ExtendableMessage {
   optional int32 some_int = 3;
 }
+extend google.protobuf.ExtensionRangeOptions {
+  optional string my_range_option_b = 50008;
+  optional string my_range_option_a = 50000;
+}
+
 
 )";
 
     const auto sanitized = R"(syntax = "proto2";
+
+import "google/protobuf/descriptor.proto";
 
 message SimpleMessage {
   optional int32 foo = 1;
@@ -1100,14 +1110,24 @@ message ExtendableMessage {
     declaration = {full_name : ".my_message" , type : ".SimpleMessage" , number : 557 , reserved : true , repeated : false
   }
   ];
+  extensions 777 to 777 [
+    (my_range_option_b) = "some value",
+    (my_range_option_a) = "some other value"
+  ];
 }
 extend ExtendableMessage {
   optional int32 some_int = 3;
+}
+extend google.protobuf.ExtensionRangeOptions {
+  optional string my_range_option_b = 50008;
+  optional string my_range_option_a = 50000;
 }
 
 )";
 
     const auto normalized = R"(syntax = "proto2";
+
+import "google/protobuf/descriptor.proto";
 
 message SimpleMessage {
   optional int32 foo = 1;
@@ -1138,9 +1158,17 @@ message ExtendableMessage {
       reserved: true,
       repeated: false}
   ];
+  extensions 777 to 777 [
+    (my_range_option_a) = "some other value",
+    (my_range_option_b) = "some value"
+  ];
 }
 extend .ExtendableMessage {
   optional int32 some_int = 3;
+}
+extend .google.protobuf.ExtensionRangeOptions {
+  optional string my_range_option_a = 50000;
+  optional string my_range_option_b = 50008;
 }
 
 )";
