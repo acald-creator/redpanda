@@ -25,6 +25,7 @@
 #include "storage/logger.h"
 #include "utils/tracking_allocator.h"
 
+#include <seastar/core/loop.hh>
 #include <seastar/util/noncopyable_function.hh>
 
 #include <absl/container/btree_map.h>
@@ -295,6 +296,13 @@ public:
     bool end_of_stream() { return _fully_indexed_segment; }
 
 private:
+    ss::future<ss::stop_iteration> maybe_index_record_in_map(
+      const model::record& r,
+      model::offset base_offset,
+      model::record_batch_type type,
+      bool is_control,
+      bool& fully_indexed_batch);
+
     key_offset_map* _map;
     model::offset _start_offset;
     bool _fully_indexed_segment = true;

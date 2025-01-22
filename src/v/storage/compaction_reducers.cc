@@ -436,6 +436,29 @@ ss::future<ss::stop_iteration> tx_reducer::operator()(model::record_batch&& b) {
     co_return co_await _delegate(std::move(b));
 }
 
+ss::future<ss::stop_iteration> map_building_reducer::maybe_index_record_in_map(
+  const model::record& r,
+  model::offset base_offset,
+  model::record_batch_type type,
+  bool is_control,
+  bool& fully_indexed_batch) {
+    auto offset = base_offset + model::offset_delta(r.offset_delta());
+    if (offset < _start_offset) {
+        co_return ss::stop_iteration::no;
+    }
+
+    auto key_view = iobuf_to_bytes(r.key());
+    auto key = enhance_key(type, is_control, key_view);
+    bool success = co_await _map->put(key, offset);
+
+    if (success) {
+        co_return ss::stop_iteration::no;
+    }
+
+    fully_indexed_batch = false;
+    co_return ss::stop_iteration::yes;
+}
+
 ss::future<ss::stop_iteration>
 map_building_reducer::operator()(model::record_batch batch) {
     bool fully_indexed_batch = true;
@@ -452,22 +475,9 @@ map_building_reducer::operator()(model::record_batch batch) {
        base_offset = b.base_offset(),
        type = b.header().type,
        is_control = b.header().attrs.is_control()](
-        model::record r) -> ss::future<ss::stop_iteration> {
-          auto offset = base_offset + model::offset_delta(r.offset_delta());
-          if (offset < _start_offset) {
-              return ss::make_ready_future<ss::stop_iteration>(
-                ss::stop_iteration::no);
-          }
-          auto key_view = iobuf_to_bytes(r.key());
-          auto key = enhance_key(type, is_control, key_view);
-          return _map->put(key, offset)
-            .then([&fully_indexed_batch](bool success) -> ss::stop_iteration {
-                if (success) {
-                    return ss::stop_iteration::no;
-                }
-                fully_indexed_batch = false;
-                return ss::stop_iteration::yes;
-            });
+        const model::record& r) -> ss::future<ss::stop_iteration> {
+          return maybe_index_record_in_map(
+            r, base_offset, type, is_control, fully_indexed_batch);
       });
 
     if (fully_indexed_batch) {
