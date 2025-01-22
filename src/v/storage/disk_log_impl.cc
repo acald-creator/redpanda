@@ -1206,7 +1206,8 @@ ss::future<bool> disk_log_impl::chunked_sliding_window_compact(
   const compaction_config& compact_cfg,
   const segment_set& segs,
   key_offset_map& map) {
-    // The unindexed segment.
+    // The last segment in the segment set is the first segment we attempted and
+    // failed to index (the "unindexed" segment)
     auto seg = segs.back();
     vlog(
       gclog.debug,
@@ -1221,16 +1222,24 @@ ss::future<bool> disk_log_impl::chunked_sliding_window_compact(
     // Hold the segment rewrite lock for the entirety of the chunked compaction
     // routine. index_chunk_of_segment_for_map() will repeatedly obtain and
     // release a seg->read_lock(), and rewriting of each segment in the window
-    // happens multiple times in the below while() loop.
+    // happens multiple times in the below while() loop
     auto segment_modify_lock = co_await _segment_rewrite_lock.get_units();
+
+    // The key offset map will be repeatedly built from "chunks" of the
+    // unindexed segment and used to rewrite the segments in the sliding window
+    // until the entirety of the unindexed segment has been indexed
     while (!segment_fully_indexed) {
         if (compact_cfg.asrc) {
             compact_cfg.asrc->check();
         }
 
+        // Build up the key offset map for a chunk of the unindexed segment,
+        // starting from the last_indexed_offset
         segment_fully_indexed = co_await index_chunk_of_segment_for_map(
           compact_cfg, seg, map, *_probe, std::ref(last_indexed_offset));
 
+        // Deduplicate all of the segments in the sliding window using the key
+        // offset map built from the current chunk of the unindexed segment
         for (auto& s : segs) {
             if (compact_cfg.asrc) {
                 compact_cfg.asrc->check();
