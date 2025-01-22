@@ -11,6 +11,30 @@
 
 namespace iceberg {
 
+bool unresolved_partition_spec::is_valid_for_default_spec() const {
+    static constexpr std::string_view redpanda_field = "redpanda";
+    static const std::vector<std::string_view> allowed_fields = {
+      "partition",
+      "timestamp",
+      "key",
+    };
+    for (const auto& field : fields) {
+        if (field.source_name.size() != 2) {
+            return false;
+        }
+        if (field.source_name[0] != redpanda_field) {
+            return false;
+        }
+        if (
+          std::find(
+            allowed_fields.begin(), allowed_fields.end(), field.source_name[1])
+          == allowed_fields.end()) {
+            return false;
+        }
+    }
+    return true;
+}
+
 std::ostream&
 operator<<(std::ostream& o, const unresolved_partition_spec::field& f) {
     fmt::print(

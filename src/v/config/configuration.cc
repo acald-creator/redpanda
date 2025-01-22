@@ -3801,7 +3801,7 @@ configuration::configuration()
       "to the topic.",
       {.needs_restart = needs_restart::no, .visibility = visibility::user},
       "(hour(redpanda.timestamp))",
-      &validate_non_empty_string_opt)
+      &validate_iceberg_partition_spec)
   , development_enable_cloud_topics(
       *this,
       "development_enable_cloud_topics",

@@ -27,6 +27,10 @@ struct unresolved_partition_spec {
 
     chunked_vector<field> fields;
 
+    // Validate if the spec can be used as a default spec. For this the spec can
+    // only refer to allowed subfields of the redpanda struct column.
+    bool is_valid_for_default_spec() const;
+
     friend bool operator==(
       const unresolved_partition_spec&, const unresolved_partition_spec&)
       = default;
