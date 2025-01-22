@@ -94,9 +94,12 @@ validate_sasl_mechanisms(const std::vector<ss::sstring>& mechanisms) {
         }
     }
 
-    if (mechanisms.size() == 1 && mechanisms[0] == "PLAIN") {
-        return "When PLAIN is enabled, at least one other mechanism must be "
-               "enabled";
+    const auto contains = [&mechanisms](const std::string_view& s) {
+        return absl::c_find(mechanisms, s) != mechanisms.end();
+    };
+
+    if (contains("PLAIN") && !contains("SCRAM")) {
+        return "SCRAM mechanism must be enabled if PLAIN is enabled";
     }
 
     return std::nullopt;
