@@ -21,10 +21,15 @@ struct unresolved_partition_spec {
         transform transform;
         ss::sstring name;
 
+        friend bool operator==(const field&, const field&) = default;
         friend std::ostream& operator<<(std::ostream&, const field&);
     };
 
     chunked_vector<field> fields;
+
+    friend bool operator==(
+      const unresolved_partition_spec&, const unresolved_partition_spec&)
+      = default;
 
     friend std::ostream&
     operator<<(std::ostream&, const unresolved_partition_spec&);
