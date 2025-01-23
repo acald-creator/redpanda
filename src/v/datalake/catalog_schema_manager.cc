@@ -115,7 +115,9 @@ simple_schema_manager::ensure_table_schema(
       .schema_id = {},
       .identifier_field_ids = {},
     };
-    s.assign_fresh_ids();
+    if (auto schm_res = s.assign_fresh_ids(); schm_res.has_error()) {
+        co_return errc::failed;
+    }
 
     auto resolve_res = iceberg::partition_spec::resolve(
       partition_spec, s.schema_struct);
