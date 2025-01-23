@@ -1317,6 +1317,7 @@ struct protobuf_schema_definition::impl {
                     first_option = false;
                 };
                 if (value.options().has_deprecated()) {
+                    maybe_print_comma();
                     fmt::print(
                       os, "deprecated = {}", value.options().deprecated());
                 }

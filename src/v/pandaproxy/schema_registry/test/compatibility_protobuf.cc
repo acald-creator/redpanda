@@ -1531,7 +1531,7 @@ enum Numbers {
   ZERO=0;
   TWO = 2;
   ONE=1;
-  ALIAS = 1 [deprecated = true];
+  ALIAS = 1 [deprecated = true, debug_redact = false];
   reserved 6;
   reserved 3 to 5;
   reserved "THREE", "FOUR", "FIVE";
@@ -1679,7 +1679,7 @@ enum Numbers {
   ZERO = 0;
   TWO = 2;
   ONE = 1;
-  ALIAS = 1 [deprecated = true];
+  ALIAS = 1 [deprecated = true, debug_redact = false];
 }
 
 service FooService {
@@ -1765,7 +1765,7 @@ enum Numbers {
   reserved "THREE";
   option allow_alias = true;
   ZERO = 0;
-  ALIAS = 1 [deprecated = true];
+  ALIAS = 1 [deprecated = true, debug_redact = false];
   ONE = 1;
   TWO = 2;
 }
