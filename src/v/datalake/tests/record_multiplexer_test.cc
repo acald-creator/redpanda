@@ -397,8 +397,7 @@ TEST_F(RecordMultiplexerTest, TestBadSchemaChange) {
         "type": "record",
         "name": "RootRecord",
         "fields": [
-            { "name": "wrongname", "doc": "mylong field doc.", "type": "long" },
-            { "name": "wrongname2", "doc": "mylong field doc.", "type": "long" }
+            { "name": "mylong", "doc": "bad type promotion.", "type": "string" }
         ]
     })";
     tests::record_generator gen(&registry);

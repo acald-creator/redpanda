@@ -221,7 +221,9 @@ TEST_F(UpdateSchemaActionTest, TestRemoveColumn) {
 }
 
 TEST_F(UpdateSchemaActionTest, TestAssignFieldIds) {
-    transaction tx(create_table());
+    auto t = create_table();
+    auto old_last_col = t.last_column_id;
+    transaction tx(std::move(t));
     auto new_schema = make_schema(12345, 10);
     auto new_schema_len = new_schema.schema_struct.fields.size();
     auto res = tx.set_schema(std::move(new_schema)).get();
@@ -232,5 +234,7 @@ TEST_F(UpdateSchemaActionTest, TestAssignFieldIds) {
 
     auto highest_field = add_update.schema.highest_field_id();
     ASSERT_TRUE(highest_field.has_value());
-    ASSERT_EQ(27, highest_field.value()());
+    // Check that the IDs assigned to the new schema increase from the last
+    // assigned to the original schema
+    ASSERT_EQ(old_last_col + 27, highest_field.value()());
 }
