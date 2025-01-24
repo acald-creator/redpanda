@@ -253,6 +253,10 @@ auto field_options() {
       field_option{
         "lazy", &pb::FieldOptions::has_lazy, &pb::FieldOptions::lazy},
       field_option{
+        "unverified_lazy",
+        &pb::FieldOptions::has_unverified_lazy,
+        &pb::FieldOptions::unverified_lazy},
+      field_option{
         "weak", &pb::FieldOptions::has_weak, &pb::FieldOptions::weak},
       field_option{
         "ctype", &pb::FieldOptions::has_ctype, &pb::FieldOptions::ctype},
