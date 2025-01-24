@@ -147,7 +147,7 @@ redpanda_cc_library(
     ],
     include_prefix = "iceberg",
     visibility = [
-        "//src/v/iceberg:__subpackages__",
+        "//visibility:public",
     ],
     deps = [
         ":compatibility_types",
