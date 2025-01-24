@@ -70,6 +70,7 @@
 #include <algorithm>
 #include <charconv>
 #include <concepts>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <ranges>
@@ -1310,14 +1311,16 @@ struct protobuf_schema_definition::impl {
         for (const auto& option : uninterpreted_options) {
             fmt::print(os, "{:{}}option {};\n", "", indent + 2, option);
         }
-        std::optional<std::decay_t<decltype(enum_proto.value())>> values;
-        if (is_normalized) {
-            values = enum_proto.value();
-            std::ranges::sort(values.value(), std::less{}, [](const auto& v) {
-                return std::pair<int, std::string_view>{v.number(), v.name()};
-            });
-        }
-        for (const auto& value : values.value_or(enum_proto.value())) {
+        const auto values = maybe_sorted(
+          enum_proto.value(), std::less{}, [](const auto& v) {
+              // In proto3, enums are open and open enums need to
+              // have the first field being equal to zero. By casting
+              // to an unsigned integer for sorting, all the negative
+              // fields will be at the end, after all the positives.
+              return std::pair<uint32_t, std::string_view>{
+                static_cast<uint32_t>(v.number()), v.name()};
+          });
+        for (const auto& value : values) {
             fmt::print(
               os, "{:{}}{} = {}", "", indent + 2, value.name(), value.number());
             if (value.has_options()) {

@@ -1530,6 +1530,8 @@ message Baz {
 
 enum Numbers {
   ZERO=0;
+  MINUS_ONE =-1;
+  MINUS_TWO =-2;
   TWO = 2;
   ONE=1;
   ALIAS = 1 [deprecated = true, debug_redact = false];
@@ -1679,6 +1681,8 @@ enum Numbers {
   reserved "SIX";
   option allow_alias = true;
   ZERO = 0;
+  MINUS_ONE = -1;
+  MINUS_TWO = -2;
   TWO = 2;
   ONE = 1;
   ALIAS = 1 [deprecated = true, debug_redact = false];
@@ -1771,6 +1775,8 @@ enum Numbers {
   ALIAS = 1 [deprecated = true, debug_redact = false];
   ONE = 1;
   TWO = 2;
+  MINUS_TWO = -2;
+  MINUS_ONE = -1;
 }
 
 service FooService {
