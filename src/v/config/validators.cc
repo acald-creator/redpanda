@@ -12,6 +12,7 @@
 #include "config/validators.h"
 
 #include "config/configuration.h"
+#include "datalake/partition_spec_parser.h"
 #include "model/namespace.h"
 #include "model/validation.h"
 #include "serde/rw/chrono.h"
@@ -258,6 +259,22 @@ std::optional<ss::sstring> validate_tombstone_retention_ms(
         }
     }
 
+    return std::nullopt;
+}
+
+std::optional<ss::sstring>
+validate_iceberg_partition_spec(const ss::sstring& value) {
+    auto parsed = datalake::parse_partition_spec(value);
+    if (parsed.has_error()) {
+        return fmt::format(
+          "couldn't parse iceberg partition spec `{}': {}",
+          value,
+          parsed.error());
+    }
+    if (!parsed.value().is_valid_for_default_spec()) {
+        return fmt::format(
+          "partition spec `{}' can't be used as a default spec", value);
+    }
     return std::nullopt;
 }
 
