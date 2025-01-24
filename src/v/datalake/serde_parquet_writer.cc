@@ -37,7 +37,10 @@ ss::future<writer_error> serde_parquet_writer::finish() {
 ss::future<std::unique_ptr<parquet_ostream>>
 serde_parquet_writer_factory::create_writer(
   const iceberg::struct_type& schema, ss::output_stream<char> out) {
-    serde::parquet::writer::options opts{.schema = schema_to_parquet(schema)};
+    serde::parquet::writer::options opts{
+      .schema = schema_to_parquet(schema),
+      .compress = true,
+    };
     serde::parquet::writer writer(std::move(opts), std::move(out));
     co_await writer.init();
     co_return std::make_unique<serde_parquet_writer>(std::move(writer));
