@@ -1513,6 +1513,7 @@ option go_package = "foo.example.com/fooservice";
 option cc_enable_arenas = true;
 option objc_class_prefix = "FS";
 option csharp_namespace = "Foo.FooService";
+option php_namespace = "my_php\ns";
 
 
 // public should come last
@@ -1615,6 +1616,7 @@ option go_package = "foo.example.com/fooservice";
 option cc_enable_arenas = true;
 option objc_class_prefix = "FS";
 option csharp_namespace = "Foo.FooService";
+option php_namespace = "my_php\ns";
 
 message Baz {
   .google.protobuf.Any any = 1;
@@ -1703,6 +1705,7 @@ option java_outer_classname = "FooService";
 option java_package = "com.example.foo";
 option objc_class_prefix = "FS";
 option optimize_for = SPEED;
+option php_namespace = "my_php\ns";
 
 message Baz {
   .google.protobuf.Any any = 1;
