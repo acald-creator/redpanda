@@ -1676,6 +1676,7 @@ void rm_stm::apply_fence(model::producer_identity pid, model::record_batch b) {
 }
 
 ss::future<> rm_stm::do_apply(const model::record_batch& b) {
+    auto holder = _gate.hold();
     const auto& hdr = b.header();
     const auto bid = model::batch_identity::from(hdr);
 
