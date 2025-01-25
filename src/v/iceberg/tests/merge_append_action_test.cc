@@ -7,8 +7,8 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 #include "cloud_io/remote.h"
+#include "cloud_io/tests/s3_imposter.h"
 #include "cloud_io/tests/scoped_remote.h"
-#include "cloud_storage/tests/s3_imposter.h"
 #include "iceberg/manifest_entry.h"
 #include "iceberg/manifest_io.h"
 #include "iceberg/merge_append_action.h"
