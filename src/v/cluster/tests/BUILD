@@ -611,3 +611,17 @@ redpanda_cc_bench(
         "@seastar//:benchmark",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "topic_properties_test",
+    timeout = "short",
+    srcs = [
+        "topic_properties_test.cc",
+    ],
+    cpu = 1,
+    deps = [
+        "//src/v/cluster:topic_configuration",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+    ],
+)
