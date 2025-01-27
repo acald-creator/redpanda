@@ -12,7 +12,7 @@
 
 #include <gtest/gtest.h>
 
-ss::logger lg("config test"); // NOLINT
+ss::logger lg("config_test"); // NOLINT
 
 namespace config {
 
