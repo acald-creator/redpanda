@@ -266,3 +266,16 @@ rp_test(
   ARGS "-- -c 1"
   LABELS cluster
 )
+
+rp_test(
+  UNIT_TEST
+  GTEST
+  BINARY_NAME types_test
+  SOURCES
+     types_test.cc
+  LIBRARIES
+    v::gtest_main
+    v::cluster
+  ARGS "-- -c 1"
+  LABELS cluster
+)

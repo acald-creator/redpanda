@@ -625,3 +625,17 @@ redpanda_cc_gtest(
         "@googletest//:gtest",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "types_test",
+    timeout = "short",
+    srcs = [
+        "types_test.cc",
+    ],
+    cpu = 1,
+    deps = [
+        "//src/v/cluster",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+    ],
+)
