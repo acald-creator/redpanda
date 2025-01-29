@@ -31,9 +31,11 @@ go_test(
     embed = [":oauth"],
     deps = [
         "//src/go/rpk/pkg/config",
+        "@build_buf_gen_go_redpandadata_cloud_protocolbuffers_go//redpanda/api/iam/v1beta2",
         "@com_github_lestrrat_go_jwx//jwa",
         "@com_github_lestrrat_go_jwx//jwt",
         "@com_github_spf13_afero//:afero",
         "@com_github_stretchr_testify//require",
+        "@org_golang_google_protobuf//proto",
     ],
 )

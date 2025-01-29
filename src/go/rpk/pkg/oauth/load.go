@@ -13,8 +13,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var inTests bool
-
 // LoadFlow loads or creates a config at default path, and validates and
 // refreshes or creates an auth token using the given authentication provider.
 //
@@ -80,13 +78,6 @@ func LoadFlow(ctx context.Context, fs afero.Fs, cfg *config.Config, cl Client, n
 			}
 			orgOnce = true
 
-			if inTests {
-				zap.L().Sugar().Debug("returning fake organization because PublicAPIURL is empty")
-				return &iamv1beta2.Organization{
-					Id:   "no-url-org-id",
-					Name: "no-url-org",
-				}, nil
-			}
 			cl := publicapi.NewCloudClientSet(cfg.DevOverrides().PublicAPIURL, tok.AccessToken)
 
 			var resp *connect.Response[iamv1beta2.GetCurrentOrganizationResponse]
