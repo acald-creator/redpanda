@@ -10,12 +10,9 @@
 
 #pragma once
 
-#include "base/vassert.h"
 #include "iceberg/compatibility_types.h"
 #include "iceberg/datatypes.h"
 #include "iceberg/field_collecting_visitor.h"
-
-#include <seastar/util/variant_utils.hh>
 
 namespace iceberg {
 
