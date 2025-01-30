@@ -11,6 +11,7 @@
 #include "datalake/translation/partition_translator.h"
 
 #include "cluster/archival/types.h"
+#include "cluster/notification.h"
 #include "cluster/partition.h"
 #include "datalake/coordinator/frontend.h"
 #include "datalake/coordinator/translated_offset_range.h"
@@ -24,11 +25,18 @@
 #include "datalake/translation/state_machine.h"
 #include "datalake/translation_task.h"
 #include "kafka/utils/txn_reader.h"
+#include "model/fundamental.h"
+#include "model/timeout_clock.h"
 #include "resource_mgmt/io_priority.h"
 #include "ssx/future-util.h"
 #include "utils/lazy_abort_source.h"
 
+#include <seastar/core/abort_source.hh>
+#include <seastar/core/future.hh>
 #include <seastar/coroutine/as_future.hh>
+
+#include <functional>
+#include <optional>
 
 namespace datalake::translation {
 
@@ -125,12 +133,28 @@ private:
     coordinator::frontend& coordinator_fe_;
 };
 
+ss::future<cluster::errc> wait_stm_translated(
+  ss::shared_ptr<translation_stm> stm,
+  model::offset o,
+  model::timeout_clock::time_point deadline,
+  std::optional<std::reference_wrapper<ss::abort_source>> as) {
+    try {
+        co_await stm->wait_translated(model::prev_offset(o), deadline, as);
+    } catch (const ss::abort_requested_exception&) {
+        co_return cluster::errc::shutting_down;
+    } catch (const ss::timed_out_error&) {
+        co_return cluster::errc::timeout;
+    }
+    co_return cluster::errc::success;
+}
+
 } // namespace
 
 static constexpr std::chrono::milliseconds translation_jitter{500};
 constexpr ::model::timeout_clock::duration wait_timeout = 5s;
 
 partition_translator::~partition_translator() = default;
+
 partition_translator::partition_translator(
   ss::lw_shared_ptr<cluster::partition> partition,
   ss::sharded<coordinator::frontend>* frontend,
@@ -148,6 +172,8 @@ partition_translator::partition_translator(
   , _stm(_partition->raft()
            ->stm_manager()
            ->get<datalake::translation::translation_stm>())
+  , _partition_flush_subscription(_partition->register_flush_hook(
+      std::bind_front(&wait_stm_translated, _stm)))
   , _frontend(frontend)
   , _features(features)
   , _cloud_io(cloud_io)
@@ -204,6 +230,7 @@ ss::future<> partition_translator::stop() {
     auto f = _gate.close();
     _as.request_abort();
     co_await std::move(f);
+    _partition->unregister_flush_hook(_partition_flush_subscription);
 }
 
 kafka::offset partition_translator::min_offset_for_translation() const {
