@@ -18,6 +18,7 @@
 #include "datalake/fwd.h"
 #include "features/fwd.h"
 #include "kafka/data/partition_proxy.h"
+#include "model/metadata.h"
 #include "model/record_batch_reader.h"
 #include "random/simple_time_jitter.h"
 #include "ssx/semaphore.h"
@@ -78,7 +79,8 @@ public:
       std::chrono::milliseconds translation_interval,
       ss::scheduling_group sg,
       size_t reader_max_bytes,
-      std::unique_ptr<ssx::semaphore>* parallel_translations);
+      std::unique_ptr<ssx::semaphore>* parallel_translations,
+      model::iceberg_invalid_record_action invalid_record_action);
     ~partition_translator();
 
     void start_translation_in_background(ss::scheduling_group);
@@ -87,6 +89,10 @@ public:
 
     std::chrono::milliseconds translation_interval() const;
     void reset_translation_interval(std::chrono::milliseconds new_base);
+
+    model::iceberg_invalid_record_action invalid_record_action() const;
+    void reset_invalid_record_action(
+      model::iceberg_invalid_record_action new_action);
 
 private:
     bool can_continue() const;
@@ -142,6 +148,7 @@ private:
     // a memory budget for all translations (semaphore below).
     size_t _max_bytes_per_reader;
     std::unique_ptr<ssx::semaphore>* _parallel_translations;
+    model::iceberg_invalid_record_action _invalid_record_action;
     std::filesystem::path _writer_scratch_space;
     ss::gate _gate;
     ss::abort_source _as;

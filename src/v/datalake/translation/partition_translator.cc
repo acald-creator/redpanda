@@ -26,6 +26,7 @@
 #include "datalake/translation_task.h"
 #include "kafka/utils/txn_reader.h"
 #include "model/fundamental.h"
+#include "model/metadata.h"
 #include "model/timeout_clock.h"
 #include "resource_mgmt/io_priority.h"
 #include "ssx/future-util.h"
@@ -166,7 +167,8 @@ partition_translator::partition_translator(
   std::chrono::milliseconds translation_interval,
   ss::scheduling_group sg,
   size_t reader_max_bytes,
-  std::unique_ptr<ssx::semaphore>* parallel_translations)
+  std::unique_ptr<ssx::semaphore>* parallel_translations,
+  model::iceberg_invalid_record_action invalid_record_action)
   : _term(partition->raft()->term())
   , _partition(std::move(partition))
   , _stm(_partition->raft()
@@ -187,6 +189,7 @@ partition_translator::partition_translator(
   , _jitter{translation_interval, translation_jitter}
   , _max_bytes_per_reader(reader_max_bytes)
   , _parallel_translations(parallel_translations)
+  , _invalid_record_action(invalid_record_action)
   , _writer_scratch_space(std::filesystem::temp_directory_path())
   , _logger(prefix_logger{
       datalake_log, fmt::format("{}-term-{}", _partition->ntp(), _term)}) {
@@ -223,6 +226,18 @@ void partition_translator::reset_translation_interval(
       _logger.info,
       "Iceberg translation interval reset to: {}",
       _jitter.base_duration());
+}
+
+model::iceberg_invalid_record_action
+partition_translator::invalid_record_action() const {
+    return _invalid_record_action;
+}
+
+void partition_translator::reset_invalid_record_action(
+  model::iceberg_invalid_record_action new_action) {
+    vlog(
+      _logger.info, "Iceberg invalid record action reset to: {}", new_action);
+    _invalid_record_action = new_action;
 }
 
 ss::future<> partition_translator::stop() {
@@ -269,7 +284,9 @@ partition_translator::do_translation_for_range(
       *_schema_mgr,
       *_type_resolver,
       *_record_translator,
-      *_table_creator};
+      *_table_creator,
+      _invalid_record_action,
+    };
     const auto& ntp = _partition->ntp();
     auto remote_path_prefix = remote_path{
       fmt::format("{}/{}/{}", iceberg_file_path_prefix, ntp.path(), _term)};
