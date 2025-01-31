@@ -427,6 +427,7 @@ redpanda_cc_library(
         ":values_avro",
         ":values_protobuf",
         "//src/v/iceberg:avro_utils",
+        "//src/v/iceberg:compatibility_utils",
         "//src/v/iceberg:values",
         "@avro",
         "@protobuf",

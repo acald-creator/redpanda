@@ -147,7 +147,7 @@ redpanda_cc_library(
     ],
     include_prefix = "iceberg",
     visibility = [
-        "//src/v/iceberg:__subpackages__",
+        "//visibility:public",
     ],
     deps = [
         ":compatibility_types",
@@ -632,6 +632,7 @@ redpanda_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":datatypes",
+        "//src/v/base",
         "//src/v/container:chunked_hash_map",
         "//src/v/utils:named_type",
         "@abseil-cpp//absl/container:btree",
