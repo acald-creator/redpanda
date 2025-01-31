@@ -37,10 +37,15 @@ redpanda_cc_library(
         "coordinator.h",
     ],
     implementation_deps = [
+        ":iceberg_snapshot_remover",
         "//src/v/base",
+        "//src/v/datalake:catalog_schema_manager",
         "//src/v/datalake:logger",
+        "//src/v/datalake:partition_spec_parser",
+        "//src/v/datalake:record_schema_resolver",
+        "//src/v/datalake:record_translator",
         "//src/v/datalake:schema_identifier",
-        "//src/v/datalake:table_creator",
+        "//src/v/datalake:table_id_provider",
         "//src/v/datalake:types",
         "//src/v/ssx:future_util",
         "//src/v/ssx:sleep_abortable",
@@ -49,6 +54,7 @@ redpanda_cc_library(
     include_prefix = "datalake/coordinator",
     deps = [
         ":file_committer",
+        ":snapshot_remover",
         ":state_update",
         ":stm",
         "//src/v/cluster",
@@ -69,6 +75,7 @@ redpanda_cc_library(
     ],
     implementation_deps = [
         ":iceberg_file_committer",
+        ":iceberg_snapshot_remover",
         "//src/v/base",
         "//src/v/config",
         "//src/v/datalake:catalog_schema_manager",
@@ -144,7 +151,10 @@ redpanda_cc_library(
     ],
     deps = [
         "//src/v/base",
+        "//src/v/bytes",
+        "//src/v/container:fragmented_vector",
         "//src/v/serde",
+        "//src/v/serde:bytes",
         "@fmt",
         "@seastar",
     ],
@@ -160,6 +170,7 @@ redpanda_cc_library(
         ":state_update",
         "//src/v/base",
         "//src/v/container:fragmented_vector",
+        "//src/v/iceberg:table_identifier",
         "@seastar",
     ],
 )
@@ -177,12 +188,13 @@ redpanda_cc_library(
         ":state",
         "//src/v/base",
         "//src/v/datalake:logger",
-        "//src/v/datalake:table_definition",
+        "//src/v/datalake:table_id_provider",
         "//src/v/iceberg:manifest_entry",
         "//src/v/iceberg:partition_key",
         "//src/v/iceberg:table_metadata",
         "//src/v/iceberg:transaction",
         "//src/v/iceberg:values",
+        "//src/v/iceberg:values_bytes",
     ],
     include_prefix = "datalake/coordinator",
     deps = [
@@ -192,6 +204,44 @@ redpanda_cc_library(
         "//src/v/container:fragmented_vector",
         "//src/v/iceberg:catalog",
         "//src/v/iceberg:manifest_io",
+        "//src/v/iceberg:table_identifier",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "iceberg_snapshot_remover",
+    srcs = [
+        "iceberg_snapshot_remover.cc",
+    ],
+    hdrs = [
+        "iceberg_snapshot_remover.h",
+    ],
+    implementation_deps = [
+        "//src/v/datalake:logger",
+        "//src/v/iceberg:manifest_entry",
+        "//src/v/iceberg:transaction",
+    ],
+    include_prefix = "datalake/coordinator",
+    deps = [
+        ":snapshot_remover",
+        "//src/v/base",
+        "//src/v/iceberg:catalog",
+        "//src/v/iceberg:manifest_io",
+        "//src/v/utils:prefix_logger",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "snapshot_remover",
+    hdrs = [
+        "snapshot_remover.h",
+    ],
+    include_prefix = "datalake/coordinator",
+    deps = [
+        "//src/v/base",
+        "//src/v/model",
         "@seastar",
     ],
 )

@@ -48,15 +48,9 @@ public:
       model::topic, const topics_state&) const final;
 
     ss::future<checked<std::nullopt_t, errc>>
-    drop_table(const model::topic&) const final;
+    drop_table(const iceberg::table_identifier&) const final;
 
 private:
-    // TODO: pull this out into some helper? Seems useful for other actions.
-    iceberg::table_identifier table_id_for_topic(const model::topic& t) const;
-
-    ss::future<checked<iceberg::table_metadata, errc>>
-    load_table(const iceberg::table_identifier&) const;
-
     // Must outlive this committer.
     iceberg::catalog& catalog_;
     iceberg::manifest_io& io_;

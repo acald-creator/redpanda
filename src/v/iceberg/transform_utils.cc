@@ -1,11 +1,12 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 
 #include "iceberg/transform_utils.h"
 
@@ -18,6 +19,15 @@ struct transform_applying_visitor {
     explicit transform_applying_visitor(const value& source_val)
       : source_val_(source_val) {}
     const value& source_val_;
+
+    value operator()(const identity_transform&) {
+        auto primitive = std::get_if<primitive_value>(&source_val_);
+        if (primitive) {
+            return make_copy(*primitive);
+        }
+        throw std::invalid_argument(
+          fmt::format("value {} must be primitive", source_val_));
+    }
 
     value operator()(const hour_transform&) {
         int_value v{std::visit(hour_transform_visitor{}, source_val_)};

@@ -13,7 +13,6 @@
 
 #include "config/bounded_property.h"
 #include "config/broker_endpoint.h"
-#include "config/client_group_byte_rate_quota.h"
 #include "config/config_store.h"
 #include "config/convert.h"
 #include "config/data_directory_path.h"
@@ -108,8 +107,6 @@ private:
 
 struct configuration final : public config_store {
     using meta = base_property::metadata;
-    constexpr static auto target_produce_quota_byte_rate_default
-      = 0; // disabled
 
     // WAL
     bounded_property<uint64_t> log_segment_size;
@@ -156,6 +153,7 @@ struct configuration final : public config_store {
     bounded_property<std::optional<int32_t>> topic_fds_per_partition;
     bounded_property<uint32_t> topic_partitions_per_shard;
     bounded_property<uint32_t> topic_partitions_reserve_shard0;
+    bounded_property<uint32_t> topic_partitions_memory_allocation_percent;
     property<std::chrono::milliseconds>
       partition_manager_shutdown_watchdog_timeout;
 
@@ -191,9 +189,9 @@ struct configuration final : public config_store {
     bounded_property<int16_t> default_num_windows;
     bounded_property<std::chrono::milliseconds> default_window_sec;
     property<std::chrono::milliseconds> quota_manager_gc_sec;
-    bounded_property<uint32_t> target_quota_byte_rate;
-    property<std::optional<uint32_t>> target_fetch_quota_byte_rate;
-    bounded_property<std::optional<uint32_t>> kafka_admin_topic_api_rate;
+    deprecated_property target_quota_byte_rate;
+    deprecated_property target_fetch_quota_byte_rate;
+    deprecated_property kafka_admin_topic_api_rate;
     property<std::optional<ss::sstring>> cluster_id;
     property<bool> disable_metrics;
     property<bool> disable_public_metrics;
@@ -234,6 +232,7 @@ struct configuration final : public config_store {
     enum_property<model::compression> log_compression_type;
     property<size_t> fetch_max_bytes;
     property<bool> use_fetch_scheduler_group;
+    property<bool> use_produce_scheduler_group;
     property<std::chrono::milliseconds> metadata_status_wait_timeout_ms;
     property<std::chrono::seconds> kafka_tcp_keepalive_idle_timeout_seconds;
     property<std::chrono::seconds> kafka_tcp_keepalive_probe_interval_seconds;
@@ -358,10 +357,8 @@ struct configuration final : public config_store {
     property<std::optional<uint32_t>> kafka_connections_max;
     property<std::optional<uint32_t>> kafka_connections_max_per_ip;
     property<std::vector<ss::sstring>> kafka_connections_max_overrides;
-    one_or_many_map_property<client_group_quota>
-      kafka_client_group_byte_rate_quota;
-    one_or_many_map_property<client_group_quota>
-      kafka_client_group_fetch_byte_rate_quota;
+    deprecated_property kafka_client_group_byte_rate_quota;
+    deprecated_property kafka_client_group_fetch_byte_rate_quota;
     bounded_property<std::optional<int>> kafka_rpc_server_tcp_recv_buf;
     bounded_property<std::optional<int>> kafka_rpc_server_tcp_send_buf;
     bounded_property<std::optional<size_t>> kafka_rpc_server_stream_recv_buf;
@@ -468,7 +465,8 @@ struct configuration final : public config_store {
     property<std::chrono::milliseconds>
       cloud_storage_topic_purge_grace_period_ms;
     property<bool> cloud_storage_disable_upload_consistency_checks;
-    property<bool> cloud_storage_disable_metadata_consistency_checks;
+    deprecated_property cloud_storage_disable_metadata_consistency_checks;
+    property<bool> cloud_storage_disable_archival_stm_rw_fence;
     property<std::chrono::milliseconds> cloud_storage_hydration_timeout_ms;
     property<bool> cloud_storage_disable_remote_labels_for_tests;
 
@@ -667,6 +665,7 @@ struct configuration final : public config_store {
     config::property<size_t> kafka_schema_id_validation_cache_capacity;
 
     property<bool> schema_registry_normalize_on_startup;
+    property<bool> schema_registry_protobuf_renderer_v2;
     property<std::optional<uint32_t>> pp_sr_smp_max_non_local_requests;
     bounded_property<size_t> max_in_flight_schema_registry_requests_per_shard;
     bounded_property<size_t> max_in_flight_pandaproxy_requests_per_shard;
@@ -699,6 +698,7 @@ struct configuration final : public config_store {
     property<bool> unsafe_enable_consumer_offsets_delete_retention;
 
     enum_property<tls_version> tls_min_version;
+    property<bool> tls_enable_renegotiation;
 
     // datalake configurations
     property<bool> iceberg_enabled;
@@ -720,6 +720,9 @@ struct configuration final : public config_store {
     property<std::optional<ss::sstring>> iceberg_rest_catalog_prefix;
 
     property<bool> iceberg_delete;
+    property<ss::sstring> iceberg_default_partition_spec;
+    enum_property<model::iceberg_invalid_record_action>
+      iceberg_invalid_record_action;
 
     configuration();
 

@@ -7,6 +7,7 @@
  *
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
+#include "cloud_io/provider.h"
 #include "datalake/base_types.h"
 #include "datalake/catalog_schema_manager.h"
 #include "datalake/local_parquet_file_writer.h"
@@ -14,12 +15,13 @@
 #include "datalake/record_schema_resolver.h"
 #include "datalake/record_translator.h"
 #include "datalake/serde_parquet_writer.h"
-#include "datalake/table_creator.h"
 #include "datalake/tests/catalog_and_registry_fixture.h"
 #include "datalake/tests/record_generator.h"
 #include "datalake/tests/test_data_writer.h"
+#include "datalake/tests/test_utils.h"
 #include "iceberg/filesystem_catalog.h"
 #include "model/fundamental.h"
+#include "model/metadata.h"
 #include "model/record_batch_reader.h"
 #include "model/tests/random_batch.h"
 #include "storage/record_batch_builder.h"
@@ -31,13 +33,14 @@
 
 using namespace datalake;
 namespace {
-simple_schema_manager simple_schema_mgr;
+simple_schema_manager simple_schema_mgr(iceberg::uri("s3://bucket/test"));
 binary_type_resolver bin_resolver;
 direct_table_creator t_creator{bin_resolver, simple_schema_mgr};
 const model::ntp
   ntp(model::ns{"rp"}, model::topic{"t"}, model::partition_id{0});
 const model::revision_id rev{123};
 default_translator translator;
+lazy_abort_source as([] { return std::nullopt; });
 } // namespace
 
 TEST(DatalakeMultiplexerTest, TestMultiplexer) {
@@ -53,7 +56,12 @@ TEST(DatalakeMultiplexerTest, TestMultiplexer) {
       simple_schema_mgr,
       bin_resolver,
       translator,
-      t_creator);
+      t_creator,
+      model::iceberg_invalid_record_action::dlq_table,
+      location_provider(
+        cloud_io::s3_compat_provider{"s3"},
+        cloud_storage_clients::bucket_name{"bucket"}),
+      as);
 
     model::test::record_batch_spec batch_spec;
     batch_spec.records = record_count;
@@ -74,7 +82,8 @@ TEST(DatalakeMultiplexerTest, TestMultiplexer) {
     ASSERT_TRUE(result.has_value());
     ASSERT_EQ(result.value().data_files.size(), 1);
     EXPECT_EQ(
-      result.value().data_files[0].row_count, record_count * batch_count);
+      result.value().data_files[0].local_file.row_count,
+      record_count * batch_count);
     EXPECT_EQ(result.value().start_offset(), start_offset);
     // Subtract one since offsets end at 0, and this is an inclusive range.
     EXPECT_EQ(
@@ -93,20 +102,25 @@ TEST(DatalakeMultiplexerTest, TestMultiplexerWriteError) {
       simple_schema_mgr,
       bin_resolver,
       translator,
-      t_creator);
+      t_creator,
+      model::iceberg_invalid_record_action::dlq_table,
+      location_provider(
+        cloud_io::s3_compat_provider{"s3"},
+        cloud_storage_clients::bucket_name{"bucket"}),
+      as);
 
     model::test::record_batch_spec batch_spec;
     batch_spec.records = record_count;
     batch_spec.count = batch_count;
     ss::circular_buffer<model::record_batch> batches
-      = model::test::make_random_batches(batch_spec).get0();
+      = model::test::make_random_batches(batch_spec).get();
 
     auto reader = model::make_generating_record_batch_reader(
       [batches = std::move(batches)]() mutable {
           return ss::make_ready_future<model::record_batch_reader::data_t>(
             std::move(batches));
       });
-    auto res = reader.consume(std::move(multiplexer), model::no_timeout).get0();
+    auto res = reader.consume(std::move(multiplexer), model::no_timeout).get();
     ASSERT_TRUE(res.has_error());
     EXPECT_EQ(res.error(), datalake::writer_error::parquet_conversion_error);
 }
@@ -134,14 +148,19 @@ TEST(DatalakeMultiplexerTest, WritesDataFiles) {
       simple_schema_mgr,
       bin_resolver,
       translator,
-      t_creator);
+      t_creator,
+      model::iceberg_invalid_record_action::dlq_table,
+      location_provider(
+        cloud_io::s3_compat_provider{"s3"},
+        cloud_storage_clients::bucket_name{"bucket"}),
+      as);
 
     model::test::record_batch_spec batch_spec;
     batch_spec.records = record_count;
     batch_spec.count = batch_count;
     batch_spec.offset = model::offset{start_offset};
     ss::circular_buffer<model::record_batch> batches
-      = model::test::make_random_batches(batch_spec).get0();
+      = model::test::make_random_batches(batch_spec).get();
 
     auto reader = model::make_generating_record_batch_reader(
       [batches = std::move(batches)]() mutable {
@@ -150,12 +169,13 @@ TEST(DatalakeMultiplexerTest, WritesDataFiles) {
       });
 
     auto result
-      = reader.consume(std::move(multiplexer), model::no_timeout).get0();
+      = reader.consume(std::move(multiplexer), model::no_timeout).get();
 
     ASSERT_TRUE(result.has_value());
     ASSERT_EQ(result.value().data_files.size(), 1);
     EXPECT_EQ(
-      result.value().data_files[0].row_count, record_count * batch_count);
+      result.value().data_files[0].local_file.row_count,
+      record_count * batch_count);
     EXPECT_EQ(result.value().start_offset(), start_offset);
     // Subtract one since offsets end at 0, and this is an inclusive range.
     EXPECT_EQ(
@@ -251,7 +271,10 @@ TEST_F(RecordMultiplexerParquetTest, TestSimple) {
       schema_mgr,
       type_resolver,
       translator,
-      t_creator);
+      t_creator,
+      model::iceberg_invalid_record_action::dlq_table,
+      location_provider(scoped_remote->remote.local().provider(), bucket_name),
+      as);
     auto res = reader.consume(std::move(mux), model::no_timeout).get();
     ASSERT_FALSE(res.has_error()) << res.error();
     EXPECT_EQ(res.value().start_offset(), start_offset());

@@ -952,6 +952,13 @@ class SecurityConfig:
 
 
 class LoggingConfig:
+    # A dictionary that maps logger names to the Redpanda version in which they
+    # were introduced. If a logger is not present in this dictionary, it is
+    # assumed it was always supported/does not require special handling.
+    LOGGER_GENESIS: dict[str, RedpandaVersionTriple] = {
+        "datalake": (24, 3, 1),
+    }
+
     def __init__(self, default_level: str, logger_levels={}):
         self.default_level = default_level
         self.logger_levels = logger_levels
@@ -959,15 +966,31 @@ class LoggingConfig:
     def enable_finject_logging(self):
         self.logger_levels["finject"] = "trace"
 
-    def to_args(self) -> str:
+    def to_args(
+            self,
+            redpanda_version: Optional[RedpandaVersionTriple] = None) -> str:
         """
         Generate redpanda CLI arguments for this logging config
+
+        To support running tests with mixed versions of redpanda, we need to
+        be able to generate the correct CLI arguments for the version of
+        redpanda we are running against.
+
+        If no version information is provided, we assume that we run against
+        dev and all loggers are supported.
+
+        If a logger is not present in the `LOGGER_GENESIS` dictionary, it
+        is assumed it was always supported/does not require special handling.
+
         :return: string
         """
         args = f"--default-log-level {self.default_level}"
         if self.logger_levels:
-            levels_arg = ":".join(
-                [f"{k}={v}" for k, v in self.logger_levels.items()])
+            levels_arg = ":".join([
+                f"{k}={v}" for k, v in self.logger_levels.items()
+                if not redpanda_version
+                or redpanda_version >= self.LOGGER_GENESIS.get(k, (0, 0, 0))
+            ])
             args += f" --logger-log-level={levels_arg}"
 
         return args
@@ -2140,8 +2163,10 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         if metrics_endpoint == MetricsEndpoint.PUBLIC_METRICS:
             text = self._cloud_cluster.get_public_metrics()
         else:
+            # operator V2 clusters use HTTPS for all the things
+            p = '-k https' if self.is_operator_v2_cluster() else 'http'
             text = self.kubectl.exec(
-                'curl -f -s -S http://localhost:9644/metrics', pod.name)
+                f'curl -f -s -S {p}://localhost:9644/metrics', pod.name)
         return text_string_to_metric_families(text)
 
     def metrics_sample(
@@ -2632,6 +2657,10 @@ class RedpandaService(RedpandaServiceBase):
         assert node in self.nodes, f"Node {node.account.hostname} is not started"
         self._extra_node_conf[node] = conf
 
+    def add_extra_node_conf(self, node, conf):
+        assert node in self.nodes, f"Node {node.account.hostname} is not started"
+        self._extra_node_conf[node] = {**self._extra_node_conf[node], **conf}
+
     def set_security_settings(self, settings):
         self._security = settings
         self._init_tls()
@@ -3047,10 +3076,16 @@ class RedpandaService(RedpandaServiceBase):
 
         env_preamble = self.redpanda_env_preamble()
 
+        cur_ver: Optional[RedpandaVersionTriple] = None
+        try:
+            cur_ver = self.get_version_int_tuple(node)
+        except:  # noqa
+            pass
+
         cmd = (
             f"{preamble} {env_preamble} nohup {self.find_binary('redpanda')}"
             f" --redpanda-cfg {RedpandaService.NODE_CONFIG_FILE}"
-            f" {self._log_config.to_args()} "
+            f" {self._log_config.to_args(cur_ver)} "
             " --abort-on-seastar-bad-alloc "
             " --dump-memory-diagnostics-on-alloc-failure-kind=all "
             f" {res_args} "
@@ -3383,7 +3418,7 @@ class RedpandaService(RedpandaServiceBase):
             )
         else:
             raise RuntimeError(
-                f"Unsuported cloud_storage_type: {self.si_settings.cloud_storage_type}"
+                f"Unsupported cloud_storage_type: {self.si_settings.cloud_storage_type}"
             )
 
         if not self.si_settings.bypass_bucket_creation:
@@ -3411,30 +3446,38 @@ class RedpandaService(RedpandaServiceBase):
         )
 
         if self.si_settings.cloud_storage_cleanup_strategy == CloudStorageCleanupStrategy.ALWAYS_SMALL_BUCKETS_ONLY:
-            bucket_is_small = True
-            max_object_count = 3000
-
-            # See if the bucket is small enough
-            t = time.time()
-            for i, m in enumerate(
-                    self.cloud_storage_client.list_objects(
-                        self.si_settings.cloud_storage_bucket)):
-                if i >= max_object_count:
-                    bucket_is_small = False
-                    break
-            self.logger.info(
-                f"Determining bucket count for {self.si_settings.cloud_storage_bucket} up to {max_object_count} objects took {time.time() - t}s"
-            )
-            if bucket_is_small:
-                # Log grep hint: "a small bucket"
+            if self.si_settings.cloud_storage_type == CloudStorageType.ABS:
+                # ABS buckets can be deleted without emptying so no need to check size.
+                # Also leaving buckets around when using local instance of Azurite causes
+                # performance issues and test flakiness.
                 self.logger.info(
-                    f"Bucket {self.si_settings.cloud_storage_bucket} is a small bucket (deleting it)"
+                    "Always deleting ABS buckets as they don't have to be emptied first."
                 )
             else:
+                bucket_is_small = True
+                max_object_count = 3000
+
+                # See if the bucket is small enough
+                t = time.time()
+                for i, m in enumerate(
+                        self.cloud_storage_client.list_objects(
+                            self.si_settings.cloud_storage_bucket)):
+                    if i >= max_object_count:
+                        bucket_is_small = False
+                        break
                 self.logger.info(
-                    f"Bucket {self.si_settings.cloud_storage_bucket} is NOT a small bucket (NOT deleting it)"
+                    f"Determining bucket count for {self.si_settings.cloud_storage_bucket} up to {max_object_count} objects took {time.time() - t}s"
                 )
-                return
+                if bucket_is_small:
+                    # Log grep hint: "a small bucket"
+                    self.logger.info(
+                        f"Bucket {self.si_settings.cloud_storage_bucket} is a small bucket (deleting it)"
+                    )
+                else:
+                    self.logger.info(
+                        f"Bucket {self.si_settings.cloud_storage_bucket} is NOT a small bucket (NOT deleting it)"
+                    )
+                    return
 
         elif self.si_settings.cloud_storage_cleanup_strategy == CloudStorageCleanupStrategy.IF_NOT_USING_LIFECYCLE_RULE:
             if self.si_settings.use_bucket_cleanup_policy:

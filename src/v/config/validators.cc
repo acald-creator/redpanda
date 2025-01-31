@@ -11,8 +11,8 @@
 
 #include "config/validators.h"
 
-#include "config/client_group_byte_rate_quota.h"
 #include "config/configuration.h"
+#include "datalake/partition_spec_parser.h"
 #include "model/namespace.h"
 #include "model/validation.h"
 #include "serde/rw/chrono.h"
@@ -82,40 +82,10 @@ validate_connection_rate(const std::vector<ss::sstring>& ips_with_limit) {
     return std::nullopt;
 }
 
-std::optional<ss::sstring> validate_client_groups_byte_rate_quota(
-  const std::unordered_map<ss::sstring, config::client_group_quota>&
-    groups_with_limit) {
-    for (const auto& gal : groups_with_limit) {
-        if (gal.second.quota <= 0) {
-            return fmt::format(
-              "Quota must be a non zero positive number, got: {}",
-              gal.second.quota);
-        }
-
-        for (const auto& another_group : groups_with_limit) {
-            if (another_group.first == gal.first) {
-                continue;
-            }
-            if (std::string_view(gal.second.clients_prefix)
-                  .starts_with(
-                    std::string_view(another_group.second.clients_prefix))) {
-                return fmt::format(
-                  "Group client prefix can not be prefix for another group "
-                  "name. "
-                  "Violation: {}, {}",
-                  gal.second.clients_prefix,
-                  another_group.second.clients_prefix);
-            }
-        }
-    }
-
-    return std::nullopt;
-}
-
 std::optional<ss::sstring>
 validate_sasl_mechanisms(const std::vector<ss::sstring>& mechanisms) {
     constexpr auto supported = std::to_array<std::string_view>(
-      {"GSSAPI", "SCRAM", "OAUTHBEARER"});
+      {"GSSAPI", "SCRAM", "OAUTHBEARER", "PLAIN"});
 
     // Validate results
     for (const auto& m : mechanisms) {
@@ -124,6 +94,15 @@ validate_sasl_mechanisms(const std::vector<ss::sstring>& mechanisms) {
             return ssx::sformat("'{}' is not a supported SASL mechanism", m);
         }
     }
+
+    const auto contains = [&mechanisms](const std::string_view& s) {
+        return absl::c_find(mechanisms, s) != mechanisms.end();
+    };
+
+    if (contains("PLAIN") && !contains("SCRAM")) {
+        return "SCRAM mechanism must be enabled if PLAIN is enabled";
+    }
+
     return std::nullopt;
 }
 
@@ -280,6 +259,22 @@ std::optional<ss::sstring> validate_tombstone_retention_ms(
         }
     }
 
+    return std::nullopt;
+}
+
+std::optional<ss::sstring>
+validate_iceberg_partition_spec(const ss::sstring& value) {
+    auto parsed = datalake::parse_partition_spec(value);
+    if (parsed.has_error()) {
+        return fmt::format(
+          "couldn't parse iceberg partition spec `{}': {}",
+          value,
+          parsed.error());
+    }
+    if (!parsed.value().is_valid_for_default_spec()) {
+        return fmt::format(
+          "partition spec `{}' can't be used as a default spec", value);
+    }
     return std::nullopt;
 }
 

@@ -29,7 +29,7 @@ from rptest.utils.si_utils import nodes_report_cloud_segments
 from rptest.scale_tests.topic_scale_profiles import TopicScaleProfileManager
 from rptest.services.rpk_consumer import RpkConsumer
 from rptest.services.redpanda import RESTART_LOG_ALLOW_LIST, LoggingConfig, MetricsEndpoint
-from rptest.services.kgo_verifier_services import KgoVerifierProducer, KgoVerifierSeqConsumer, KgoVerifierRandomConsumer
+from rptest.services.kgo_verifier_services import KgoVerifierProducer, KgoVerifierConsumerGroupConsumer, KgoVerifierRandomConsumer
 from rptest.services.kgo_repeater_service import KgoRepeaterService, repeater_traffic
 from rptest.services.openmessaging_benchmark import OpenMessagingBenchmark
 from rptest.services.openmessaging_benchmark_configs import OMBSampleConfigurations
@@ -43,12 +43,16 @@ from rptest.util import inject_remote_script
 BIG_FETCH = 104857600
 
 # How much memory to assign to redpanda per partition. Redpanda will be started
-# with MIB_PER_PARTITION * PARTITIONS_PER_SHARD * CORE_COUNT memory
-DEFAULT_MIB_PER_PARTITION = 4
+# with (MIB_PER_PARTITION * PARTITIONS_PER_SHARD * CORE_COUNT) / (PARTITIONS_MEMORY_ALLOCATION_PERCENT / 100) memory
+DEFAULT_MIB_PER_PARTITION = 0.2
 
 # How many partitions we will create per shard: this is the primary scaling
 # factor that controls how many partitions a given cluster will get.
-DEFAULT_PARTITIONS_PER_SHARD = 1000
+DEFAULT_PARTITIONS_PER_SHARD = 3000
+
+# How much memory is reserved for partitions
+# aka: topic_partitions_memory_allocation_percent config
+DEFAULT_PARTITIONS_MEMORY_ALLOCATION_PERCENT = 15
 
 # Large volume of data to write. If tiered storage is enabled this is the
 # amount of data to retain total. Otherwise, this can be used as a large volume
@@ -415,8 +419,10 @@ class ManyPartitionsTest(PreallocNodesTest):
         # Because segments are rolled after a write we need to size messages
         # such that actual segment size is as close as possible to the desired
         # size. In default configuration we run with `log_segment_size_jitter_percent=5`
-        # adjust the messages size to always be larger than that.
-        warmup_message_size = math.ceil(scale.segment_size * 0.06)
+        # We use a message size of 0.53 * segment_size to ensure that with two
+        # messages we are always just about above the max possible segment size (2*0.53 > 1.05).
+        # We want decently sized messages to not make this warmup phase slower than needed.
+        warmup_message_size = math.ceil(scale.segment_size * 0.53)
         target_cloud_segments = 24 * 7 * scale.partition_limit
 
         # Enough data to generate the desired number of segments plus few more
@@ -612,20 +618,21 @@ class ManyPartitionsTest(PreallocNodesTest):
             # minutes during these events.
             expect_transmit_time += 600
 
-        seq_consumer = KgoVerifierSeqConsumer(
+        verifier = KgoVerifierConsumerGroupConsumer(
             self.test_context,
             self.redpanda,
             target_topic,
             0,
+            readers=math.ceil(scale.partition_limit / 5000),
             max_msgs=max_msgs,
             nodes=[self.preallocated_nodes[2]])
-        seq_consumer.start(clean=False)
+        verifier.start(clean=False)
 
-        seq_consumer.wait(timeout_sec=expect_transmit_time)
-        assert seq_consumer.consumer_status.validator.invalid_reads == 0
+        verifier.wait(timeout_sec=expect_transmit_time)
+        assert verifier.consumer_status.validator.invalid_reads == 0
         if not scale.tiered_storage_enabled:
-            assert seq_consumer.consumer_status.validator.valid_reads >= fast_producer.produce_status.acked + msg_count_per_topic, \
-                f"{seq_consumer.consumer_status.validator.valid_reads} >= {fast_producer.produce_status.acked} + {msg_count_per_topic}"
+            assert verifier.consumer_status.validator.valid_reads >= fast_producer.produce_status.acked + msg_count_per_topic, \
+                f"{verifier.consumer_status.validator.valid_reads} >= {fast_producer.produce_status.acked} + {msg_count_per_topic}"
 
         self.free_preallocated_nodes()
 
@@ -761,7 +768,20 @@ class ManyPartitionsTest(PreallocNodesTest):
             self.redpanda,
             replication_factor=3,
             mib_per_partition=DEFAULT_MIB_PER_PARTITION,
-            topic_partitions_per_shard=DEFAULT_PARTITIONS_PER_SHARD)
+            topic_partitions_per_shard=DEFAULT_PARTITIONS_PER_SHARD,
+            partition_memory_reserve_percentage=
+            DEFAULT_PARTITIONS_MEMORY_ALLOCATION_PERCENT,
+        )
+
+        self.redpanda.add_extra_rp_conf({
+            'topic_partitions_per_shard':
+            DEFAULT_PARTITIONS_PER_SHARD,
+            'topic_memory_per_partition':
+            DEFAULT_MIB_PER_PARTITION * 1024 * 1024,
+            'topic_partitions_memory_allocation_percent':
+            DEFAULT_PARTITIONS_MEMORY_ALLOCATION_PERCENT,
+        })
+
         self.redpanda.start()
 
         # We have other OMB benchmark tests, but this one runs at the
@@ -809,7 +829,9 @@ class ManyPartitionsTest(PreallocNodesTest):
                                 replication_factor,
                                 mib_per_partition,
                                 topic_partitions_per_shard,
-                                tiered_storage_enabled=tiered_storage_enabled)
+                                tiered_storage_enabled=tiered_storage_enabled,
+                                partition_memory_reserve_percentage=
+                                DEFAULT_PARTITIONS_MEMORY_ALLOCATION_PERCENT)
 
         # Run with one huge topic: it is more stressful for redpanda when clients
         # request the metadata for many partitions at once, and the simplest way
@@ -846,6 +868,8 @@ class ManyPartitionsTest(PreallocNodesTest):
             topic_partitions_per_shard,
             'topic_memory_per_partition':
             mib_per_partition * 1024 * 1024,
+            'topic_partitions_memory_allocation_percent':
+            DEFAULT_PARTITIONS_MEMORY_ALLOCATION_PERCENT,
         })
 
         self.redpanda.start()

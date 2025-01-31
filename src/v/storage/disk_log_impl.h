@@ -31,6 +31,7 @@
 
 #include <absl/container/flat_hash_map.h>
 
+struct storage_e2e_fixture;
 namespace storage {
 
 /// \brief offset boundary type
@@ -232,6 +233,18 @@ public:
       const compaction_config& cfg,
       std::optional<model::offset> new_start_offset = std::nullopt);
 
+    ss::future<> rewrite_segment_with_offset_map(
+      const compaction_config& cfg,
+      ss::lw_shared_ptr<segment> seg,
+      key_offset_map& map,
+      bool is_finished_window_compaction,
+      bool is_clean_compacted);
+
+    ss::future<bool> chunked_sliding_window_compact(
+      const compaction_config& cfg,
+      const segment_set& segs,
+      key_offset_map& map);
+
     const auto& compaction_ratio() const { return _compaction_ratio; }
 
     static ss::future<> copy_kvstore_state(
@@ -248,6 +261,7 @@ public:
 private:
     friend class disk_log_appender; // for multi-term appends
     friend class disk_log_builder;  // for tests
+    friend ::storage_e2e_fixture;
     friend std::ostream& operator<<(std::ostream& o, const disk_log_impl& d);
 
     /// Compute file offset of the batch inside the segment

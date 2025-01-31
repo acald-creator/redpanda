@@ -16,10 +16,10 @@
 #include "datalake/coordinator/catalog_factory.h"
 #include "datalake/coordinator/coordinator.h"
 #include "datalake/coordinator/iceberg_file_committer.h"
+#include "datalake/coordinator/iceberg_snapshot_remover.h"
 #include "datalake/coordinator/state_machine.h"
 #include "datalake/logger.h"
 #include "datalake/record_schema_resolver.h"
-#include "datalake/table_creator.h"
 #include "iceberg/manifest_io.h"
 #include "model/fundamental.h"
 #include "schema/registry.h"
@@ -54,9 +54,9 @@ coordinator_manager::~coordinator_manager() = default;
 ss::future<> coordinator_manager::start() {
     catalog_ = co_await catalog_factory_->create_catalog();
     schema_mgr_ = std::make_unique<catalog_schema_manager>(*catalog_);
-    table_creator_ = std::make_unique<direct_table_creator>(
-      *type_resolver_, *schema_mgr_);
     file_committer_ = std::make_unique<iceberg_file_committer>(
+      *catalog_, manifest_io_);
+    snapshot_remover_ = std::make_unique<iceberg_snapshot_remover>(
       *catalog_, manifest_io_);
 
     manage_notifications_ = pm_.register_manage_notification(
@@ -120,12 +120,15 @@ void coordinator_manager::start_managing(cluster::partition& p) {
     auto crd = ss::make_lw_shared<coordinator>(
       std::move(stm),
       topics_,
-      *table_creator_,
+      *type_resolver_,
+      *schema_mgr_,
       [this](const model::topic& t, model::revision_id rev) {
           return remove_tombstone(t, rev);
       },
       *file_committer_,
-      config::shard_local_cfg().iceberg_catalog_commit_interval_ms.bind());
+      *snapshot_remover_,
+      config::shard_local_cfg().iceberg_catalog_commit_interval_ms.bind(),
+      config::shard_local_cfg().iceberg_default_partition_spec.bind());
     if (p.is_leader()) {
         crd->notify_leadership(self_);
     }

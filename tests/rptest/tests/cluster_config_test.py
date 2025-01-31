@@ -606,6 +606,10 @@ class ClusterConfigTest(RedpandaTest, ClusterConfigHelpersMixin):
         # Don't modify oidc_principal mapping, the value is complex and tested elsewhere.
         exclude_settings.add('oidc_principal_mapping')
 
+        # Don't modify iceberg_default_partition_spec, it has its own syntax
+        # and is tested elsewhere.
+        exclude_settings.add('iceberg_default_partition_spec')
+
         # List of settings that must be odd
         odd_settings = [
             'default_topic_replications', 'minimum_topic_replications'
@@ -705,6 +709,10 @@ class ClusterConfigTest(RedpandaTest, ClusterConfigHelpersMixin):
                     [e for e in p['enum_values'] if e != initial_value])
 
             if name == "iceberg_catalog_type":
+                valid_value = random.choice(
+                    [e for e in p['enum_values'] if e != initial_value])
+
+            if name == "iceberg_invalid_record_action":
                 valid_value = random.choice(
                     [e for e in p['enum_values'] if e != initial_value])
 
@@ -1667,6 +1675,35 @@ class ClusterConfigTest(RedpandaTest, ClusterConfigHelpersMixin):
                 with expect_exception(requests.exceptions.HTTPError,
                                       lambda e: e.response.status_code == 400):
                     self.admin.patch_cluster_config(upsert=upsert)
+
+    @cluster(num_nodes=1)
+    def test_disable_bounded_property_checks(self):
+        """
+        Test that the environmental variable __REDPANDA_TEST_DISABLE_BOUNDED_PROPERTY_CHECKS
+        being set disables bounded property checks for cluster properties.
+        """
+        out_of_bound_properties = {
+            "storage_compaction_key_map_memory": 1,
+            "log_segment_size": 2,
+            "log_segment_ms": 10
+        }
+
+        # Check that these out of bounds value updates for bounded properties are properly rejected
+        with expect_exception(requests.exceptions.HTTPError,
+                              lambda e: e.response.status_code == 400):
+            self.redpanda.set_cluster_config(out_of_bound_properties,
+                                             expect_restart=True)
+
+        environment = {"__REDPANDA_TEST_DISABLE_BOUNDED_PROPERTY_CHECKS": "ON"}
+        self.redpanda.set_environment(environment)
+        self.redpanda.restart_nodes(self.redpanda.nodes)
+
+        # Expect these out of bound value updates to succeed.
+        # expect_restart=True due to some of the properties used.
+        self.redpanda.set_cluster_config(out_of_bound_properties,
+                                         expect_restart=True)
+        for prop, value in out_of_bound_properties.items():
+            self._check_value_everywhere(prop, value)
 
 
 """

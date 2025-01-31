@@ -13,8 +13,8 @@
 #include "config/property.h"
 #include "container/fragmented_vector.h"
 #include "datalake/coordinator/file_committer.h"
+#include "datalake/coordinator/snapshot_remover.h"
 #include "datalake/coordinator/state_machine.h"
-#include "datalake/coordinator/state_update.h"
 #include "datalake/fwd.h"
 #include "model/fundamental.h"
 
@@ -41,16 +41,22 @@ public:
     coordinator(
       ss::shared_ptr<coordinator_stm> stm,
       cluster::topic_table& topics,
-      table_creator& table_creator,
+      type_resolver& type_resolver,
+      schema_manager& schema_mgr,
       remove_tombstone_f remove_tombstone,
       file_committer& file_committer,
-      config::binding<std::chrono::milliseconds> commit_interval)
+      snapshot_remover& snapshot_remover,
+      config::binding<std::chrono::milliseconds> commit_interval,
+      config::binding<ss::sstring> default_partition_spec)
       : stm_(std::move(stm))
       , topic_table_(topics)
-      , table_creator_(table_creator)
+      , type_resolver_(type_resolver)
+      , schema_mgr_(schema_mgr)
       , remove_tombstone_(std::move(remove_tombstone))
       , file_committer_(file_committer)
-      , commit_interval_(std::move(commit_interval)) {}
+      , snapshot_remover_(snapshot_remover)
+      , commit_interval_(std::move(commit_interval))
+      , default_partition_spec_(std::move(default_partition_spec)) {}
 
     void start();
     ss::future<> stop_and_wait();
@@ -59,6 +65,9 @@ public:
       model::topic topic,
       model::revision_id topic_revision,
       record_schema_components);
+
+    ss::future<checked<std::nullopt_t, errc>> sync_ensure_dlq_table_exists(
+      model::topic topic, model::revision_id topic_revision);
 
     ss::future<checked<std::nullopt_t, errc>> sync_add_files(
       model::topic_partition tp,
@@ -93,12 +102,25 @@ private:
     ss::future<checked<ss::stop_iteration, errc>>
     update_lifecycle_state(const model::topic&, model::term_id);
 
+    struct table_schema_provider;
+    struct main_table_schema_provider;
+    struct dlq_table_schema_provider;
+    ss::future<checked<std::nullopt_t, errc>> do_ensure_table_exists(
+      model::topic,
+      model::revision_id topic_revision,
+      record_schema_components,
+      std::string_view method_name,
+      const table_schema_provider&);
+
     ss::shared_ptr<coordinator_stm> stm_;
     cluster::topic_table& topic_table_;
-    table_creator& table_creator_;
+    type_resolver& type_resolver_;
+    schema_manager& schema_mgr_;
     remove_tombstone_f remove_tombstone_;
     file_committer& file_committer_;
+    snapshot_remover& snapshot_remover_;
     config::binding<std::chrono::milliseconds> commit_interval_;
+    config::binding<ss::sstring> default_partition_spec_;
 
     ss::gate gate_;
     ss::abort_source as_;

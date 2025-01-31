@@ -1451,6 +1451,33 @@ class Admin:
         if len(r.text) > 0:
             return r.json()["cluster_uuid"]
 
+    def get_metrics_uuid(self, node=None) -> str | None:
+        """
+        Returns the concents of the `/v1/cluster/metrics_uuid` endpoint.
+
+        Parameters
+        ----------
+        node: ClusterNode
+            The node to query the endpoint on. If None, a random node will be
+            chosen.
+
+        Returns
+        -------
+        str
+            The Metrics UUID
+
+        None
+            If the endpoint returns a 404 status code.
+        """
+        try:
+            r = self._request("GET", "cluster/metrics_uuid", node=node)
+        except HTTPError as ex:
+            if ex.response.status_code == 404:
+                return None
+            raise
+        if len(r.text) > 0:
+            return r.json()["uuid"]
+
     def initiate_topic_scan_and_recovery(self,
                                          payload: Optional[dict] = None,
                                          force_acquire_lock: bool = False,
@@ -1561,6 +1588,14 @@ class Admin:
 
     def get_partition_state(self, namespace, topic, partition, node=None):
         path = f"debug/partition/{namespace}/{topic}/{partition}"
+        return self._request("GET", path, node=node).json()
+
+    def get_partitions_local_summary(self, node: ClusterNode):
+        path = f"partitions/local_summary"
+        return self._request("GET", path, node=node).json()
+
+    def get_producers_state(self, namespace, topic, partition, node=None):
+        path = f"debug/producers/{namespace}/{topic}/{partition}"
         return self._request("GET", path, node=node).json()
 
     def get_local_storage_usage(self, node=None):
@@ -1849,3 +1884,15 @@ class Admin:
     def delete_debug_bundle_file(self, filename: str, node: MaybeNode = None):
         path = f"debug/bundle/file/{filename}"
         return self._request("DELETE", path, node=node)
+
+    def unsafe_abort_group_transaction(self, group_id: str, *, pid: int,
+                                       epoch: int, sequence: int):
+        params = {
+            "producer_id": pid,
+            "producer_epoch": epoch,
+            "sequence": sequence,
+        }
+        params = "&".join([f"{k}={v}" for k, v in params.items()])
+        return self._request(
+            'POST',
+            f"transaction/unsafe_abort_group_transaction/{group_id}?{params}")

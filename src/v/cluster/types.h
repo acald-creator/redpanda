@@ -482,7 +482,7 @@ struct partition_assignment
       = default;
 };
 
-enum incremental_update_operation : int8_t { none, set, remove };
+enum class incremental_update_operation : int8_t { none, set, remove };
 
 inline std::string_view
 incremental_update_operation_as_string(incremental_update_operation op) {
@@ -496,6 +496,11 @@ incremental_update_operation_as_string(incremental_update_operation op) {
     default:
         vassert(false, "Unknown operation type passed: {}", int8_t(op));
     }
+}
+
+inline std::ostream&
+operator<<(std::ostream& os, const incremental_update_operation& op) {
+    return os << incremental_update_operation_as_string(op);
 }
 
 template<typename T>
@@ -563,7 +568,7 @@ struct property_update<tristate<T>>
 struct incremental_topic_updates
   : serde::envelope<
       incremental_topic_updates,
-      serde::version<7>,
+      serde::version<8>,
       serde::compat_version<0>> {
     static constexpr int8_t version_with_data_policy = -1;
     static constexpr int8_t version_with_shadow_indexing = -3;
@@ -636,6 +641,9 @@ struct incremental_topic_updates
       leaders_preference;
     property_update<tristate<std::chrono::milliseconds>> delete_retention_ms;
     property_update<std::optional<bool>> iceberg_delete;
+    property_update<std::optional<ss::sstring>> iceberg_partition_spec;
+    property_update<std::optional<model::iceberg_invalid_record_action>>
+      iceberg_invalid_record_action;
 
     // To allow us to better control use of the deprecated shadow_indexing
     // field, use getters and setters instead.
@@ -675,7 +683,9 @@ struct incremental_topic_updates
           remote_read,
           remote_write,
           delete_retention_ms,
-          iceberg_delete);
+          iceberg_delete,
+          iceberg_partition_spec,
+          iceberg_invalid_record_action);
     }
 
     friend std::ostream&

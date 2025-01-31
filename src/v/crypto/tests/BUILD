@@ -114,8 +114,7 @@ common_env = {
 }
 
 redpanda_cc_bench(
-    name = "crypto_bench",
-    timeout = "short",
+    name = "crypto_bench_rpbench",
     srcs = ["crypto_bench.cc"],
     data = common_data_deps,
     env = common_env,
@@ -131,8 +130,7 @@ redpanda_cc_bench(
 )
 
 redpanda_cc_bench(
-    name = "crypto_bench_fips",
-    timeout = "short",
+    name = "crypto_bench_fips_rpbench",
     srcs = ["crypto_bench.cc"],
     data = common_data_deps,
     defines = ["PERF_FIPS_MODE"],

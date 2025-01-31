@@ -13,10 +13,13 @@
 #include "base/outcome.h"
 #include "base/seastarx.h"
 #include "cluster/fwd.h"
+#include "cluster/notification.h"
 #include "datalake/errors.h"
 #include "datalake/fwd.h"
+#include "datalake/location.h"
 #include "features/fwd.h"
 #include "kafka/data/partition_proxy.h"
+#include "model/metadata.h"
 #include "model/record_batch_reader.h"
 #include "random/simple_time_jitter.h"
 #include "ssx/semaphore.h"
@@ -71,13 +74,15 @@ public:
       ss::sharded<coordinator::frontend>* frontend,
       ss::sharded<features::feature_table>* features,
       std::unique_ptr<datalake::cloud_data_io>* cloud_io,
+      location_provider location_provider,
       schema_manager* schema_mgr,
       std::unique_ptr<type_resolver> type_resolver,
       std::unique_ptr<record_translator> record_translator,
       std::chrono::milliseconds translation_interval,
       ss::scheduling_group sg,
       size_t reader_max_bytes,
-      std::unique_ptr<ssx::semaphore>* parallel_translations);
+      std::unique_ptr<ssx::semaphore>* parallel_translations,
+      model::iceberg_invalid_record_action invalid_record_action);
     ~partition_translator();
 
     void start_translation_in_background(ss::scheduling_group);
@@ -86,6 +91,10 @@ public:
 
     std::chrono::milliseconds translation_interval() const;
     void reset_translation_interval(std::chrono::milliseconds new_base);
+
+    model::iceberg_invalid_record_action invalid_record_action() const;
+    void reset_invalid_record_action(
+      model::iceberg_invalid_record_action new_action);
 
 private:
     bool can_continue() const;
@@ -105,8 +114,8 @@ private:
     ss::future<std::optional<coordinator::translated_offset_range>>
     do_translation_for_range(
       retry_chain_node& parent,
-      model::record_batch_reader,
-      kafka::offset begin_offset);
+      kafka::offset read_begin,
+      kafka::offset read_end);
 
     using checkpoint_result = ss::bool_class<struct checkpoint_result>;
     ss::future<checkpoint_result> checkpoint_translated_data(
@@ -121,9 +130,11 @@ private:
     model::term_id _term;
     ss::lw_shared_ptr<cluster::partition> _partition;
     ss::shared_ptr<translation_stm> _stm;
+    cluster::partition_flush_hook_id _partition_flush_subscription;
     ss::sharded<coordinator::frontend>* _frontend;
     ss::sharded<features::feature_table>* _features;
     std::unique_ptr<datalake::cloud_data_io>* _cloud_io;
+    location_provider _location_provider;
     schema_manager* _schema_mgr;
     std::unique_ptr<type_resolver> _type_resolver;
     std::unique_ptr<record_translator> _record_translator;
@@ -140,6 +151,7 @@ private:
     // a memory budget for all translations (semaphore below).
     size_t _max_bytes_per_reader;
     std::unique_ptr<ssx::semaphore>* _parallel_translations;
+    model::iceberg_invalid_record_action _invalid_record_action;
     std::filesystem::path _writer_scratch_space;
     ss::gate _gate;
     ss::abort_source _as;

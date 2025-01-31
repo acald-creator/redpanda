@@ -11,6 +11,7 @@
 #include "datalake/translation/partition_translator.h"
 
 #include "cluster/archival/types.h"
+#include "cluster/notification.h"
 #include "cluster/partition.h"
 #include "datalake/coordinator/frontend.h"
 #include "datalake/coordinator/translated_offset_range.h"
@@ -24,11 +25,19 @@
 #include "datalake/translation/state_machine.h"
 #include "datalake/translation_task.h"
 #include "kafka/utils/txn_reader.h"
+#include "model/fundamental.h"
+#include "model/metadata.h"
+#include "model/timeout_clock.h"
 #include "resource_mgmt/io_priority.h"
 #include "ssx/future-util.h"
 #include "utils/lazy_abort_source.h"
 
+#include <seastar/core/abort_source.hh>
+#include <seastar/core/future.hh>
 #include <seastar/coroutine/as_future.hh>
+
+#include <functional>
+#include <optional>
 
 namespace datalake::translation {
 
@@ -37,7 +46,7 @@ namespace {
 // A simple utility to conditionally retry with backoff on failures.
 static constexpr std::chrono::milliseconds initial_backoff{300};
 static constexpr std::chrono::milliseconds max_translation_task_timeout{3min};
-static constexpr std::string_view iceberg_file_path_prefix = "datalake-iceberg";
+static constexpr std::string_view iceberg_data_path_prefix = "data";
 template<
   typename Func,
   typename ShouldRetry,
@@ -78,7 +87,7 @@ ss::futurize_t<FuncRet> retry_with_backoff(
 }
 
 // Creates or alters the table by delegating to the coordinator.
-class coordinator_table_creator : public table_creator {
+class coordinator_table_creator final : public table_creator {
 public:
     explicit coordinator_table_creator(coordinator::frontend& fe)
       : coordinator_fe_(fe) {}
@@ -103,9 +112,42 @@ public:
         }
     }
 
+    ss::future<checked<std::nullopt_t, errc>> ensure_dlq_table(
+      const model::topic& topic,
+      const model::revision_id topic_revision) const final {
+        auto ensure_res = co_await coordinator_fe_.ensure_dlq_table_exists(
+          coordinator::ensure_dlq_table_exists_request{
+            topic,
+            topic_revision,
+          });
+        switch (ensure_res.errc) {
+        case coordinator::errc::ok:
+            co_return std::nullopt;
+        case coordinator::errc::incompatible_schema:
+            co_return errc::incompatible_schema;
+        default:
+            co_return errc::failed;
+        }
+    }
+
 private:
     coordinator::frontend& coordinator_fe_;
 };
+
+ss::future<cluster::errc> wait_stm_translated(
+  ss::shared_ptr<translation_stm> stm,
+  model::offset o,
+  model::timeout_clock::time_point deadline,
+  std::optional<std::reference_wrapper<ss::abort_source>> as) {
+    try {
+        co_await stm->wait_translated(model::prev_offset(o), deadline, as);
+    } catch (const ss::abort_requested_exception&) {
+        co_return cluster::errc::shutting_down;
+    } catch (const ss::timed_out_error&) {
+        co_return cluster::errc::timeout;
+    }
+    co_return cluster::errc::success;
+}
 
 } // namespace
 
@@ -113,26 +155,32 @@ static constexpr std::chrono::milliseconds translation_jitter{500};
 constexpr ::model::timeout_clock::duration wait_timeout = 5s;
 
 partition_translator::~partition_translator() = default;
+
 partition_translator::partition_translator(
   ss::lw_shared_ptr<cluster::partition> partition,
   ss::sharded<coordinator::frontend>* frontend,
   ss::sharded<features::feature_table>* features,
   std::unique_ptr<cloud_data_io>* cloud_io,
+  location_provider location_provider,
   schema_manager* schema_mgr,
   std::unique_ptr<type_resolver> type_resolver,
   std::unique_ptr<record_translator> record_translator,
   std::chrono::milliseconds translation_interval,
   ss::scheduling_group sg,
   size_t reader_max_bytes,
-  std::unique_ptr<ssx::semaphore>* parallel_translations)
+  std::unique_ptr<ssx::semaphore>* parallel_translations,
+  model::iceberg_invalid_record_action invalid_record_action)
   : _term(partition->raft()->term())
   , _partition(std::move(partition))
   , _stm(_partition->raft()
            ->stm_manager()
            ->get<datalake::translation::translation_stm>())
+  , _partition_flush_subscription(_partition->register_flush_hook(
+      std::bind_front(&wait_stm_translated, _stm)))
   , _frontend(frontend)
   , _features(features)
   , _cloud_io(cloud_io)
+  , _location_provider(std::move(location_provider))
   , _schema_mgr(schema_mgr)
   , _type_resolver(std::move(type_resolver))
   , _record_translator(std::move(record_translator))
@@ -143,6 +191,7 @@ partition_translator::partition_translator(
   , _jitter{translation_interval, translation_jitter}
   , _max_bytes_per_reader(reader_max_bytes)
   , _parallel_translations(parallel_translations)
+  , _invalid_record_action(invalid_record_action)
   , _writer_scratch_space(std::filesystem::temp_directory_path())
   , _logger(prefix_logger{
       datalake_log, fmt::format("{}-term-{}", _partition->ntp(), _term)}) {
@@ -181,11 +230,24 @@ void partition_translator::reset_translation_interval(
       _jitter.base_duration());
 }
 
+model::iceberg_invalid_record_action
+partition_translator::invalid_record_action() const {
+    return _invalid_record_action;
+}
+
+void partition_translator::reset_invalid_record_action(
+  model::iceberg_invalid_record_action new_action) {
+    vlog(
+      _logger.info, "Iceberg invalid record action reset to: {}", new_action);
+    _invalid_record_action = new_action;
+}
+
 ss::future<> partition_translator::stop() {
     vlog(_logger.debug, "stopping partition translator in term {}", _term);
     auto f = _gate.close();
     _as.request_abort();
     co_await std::move(f);
+    _partition->unregister_flush_hook(_partition_flush_subscription);
 }
 
 kafka::offset partition_translator::min_offset_for_translation() const {
@@ -210,13 +272,13 @@ partition_translator::max_offset_for_translation() const {
 ss::future<std::optional<coordinator::translated_offset_range>>
 partition_translator::do_translation_for_range(
   retry_chain_node& parent,
-  model::record_batch_reader rdr,
-  kafka::offset begin_offset) {
+  kafka::offset read_begin_offset,
+  kafka::offset read_end_offset) {
     // This configuration only writes a single row group per file but we limit
     // the bytes via the reader max_bytes.
     auto writer_factory = std::make_unique<local_parquet_file_writer_factory>(
-      local_path{_writer_scratch_space}, // storage temp files are written to
-      fmt::format("{}", begin_offset),   // file prefix
+      local_path{_writer_scratch_space},    // storage temp files are written to
+      fmt::format("{}", read_begin_offset), // file prefix
       ss::make_shared<serde_parquet_writer_factory>());
 
     auto task = translation_task{
@@ -224,19 +286,50 @@ partition_translator::do_translation_for_range(
       *_schema_mgr,
       *_type_resolver,
       *_record_translator,
-      *_table_creator};
+      *_table_creator,
+      _invalid_record_action,
+      _location_provider,
+    };
     const auto& ntp = _partition->ntp();
     auto remote_path_prefix = remote_path{
-      fmt::format("{}/{}/{}", iceberg_file_path_prefix, ntp.path(), _term)};
+      fmt::format("{}/{}/{}", iceberg_data_path_prefix, ntp.path(), _term)};
     lazy_abort_source las{[this] {
         return can_continue() ? std::nullopt
                               : std::make_optional("translator stopping");
     }};
+
+    vlog(
+      _logger.debug,
+      "translating data in kafka range: [{}, {}]",
+      read_begin_offset,
+      read_end_offset);
+
+    auto log_reader = co_await _partition_proxy->make_reader(
+      {kafka::offset_cast(read_begin_offset),
+       kafka::offset_cast(read_end_offset),
+       0,
+       _max_bytes_per_reader,
+       datalake_priority(),
+       std::nullopt,
+       std::nullopt,
+       _as});
+    auto tracker = kafka::aborted_transaction_tracker::create_default(
+      _partition_proxy.get(), std::move(log_reader.ot_state));
+    auto kafka_reader
+      = model::make_record_batch_reader<kafka::read_committed_reader>(
+        std::move(tracker), std::move(log_reader.reader));
+    const translation_task::custom_partitioning_enabled is_cp_enabled{
+      _features->local().is_active(features::feature::datalake_iceberg_ga)};
+    // Be wary of introducing abortable code here that can skip cleanup
+    // of kafka_reader. The reader is cleaned up along with consumption,
+    // so we need to ensure that the reader is dispatched to translation
+    // in all cases.
     auto result = co_await task.translate(
       ntp,
       _partition->get_topic_revision_id(),
       std::move(writer_factory),
-      std::move(rdr),
+      is_cp_enabled,
+      std::move(kafka_reader),
       remote_path_prefix,
       parent,
       las);
@@ -289,29 +382,12 @@ partition_translator::do_translate_once(retry_chain_node& parent_rcn) {
     // accumulate. The resulting parquet files are only performant
     // if there is a big chunk of data in them. Smaller parquet files
     // are an overhead for iceberg metadata.
-    auto log_reader = co_await _partition_proxy->make_reader(
-      {kafka::offset_cast(read_begin_offset),
-       kafka::offset_cast(read_end_offset),
-       0,
-       _max_bytes_per_reader,
-       datalake_priority(),
-       std::nullopt,
-       std::nullopt,
-       _as});
-
     auto units = co_await ss::get_units(**_parallel_translations, 1, _as);
-    vlog(
-      _logger.debug,
-      "translating data in kafka range: [{}, {}]",
-      read_begin_offset,
-      read_end_offset);
-    auto tracker = kafka::aborted_transaction_tracker::create_default(
-      _partition_proxy.get(), std::move(log_reader.ot_state));
-    auto kafka_reader
-      = model::make_record_batch_reader<kafka::read_committed_reader>(
-        std::move(tracker), std::move(log_reader.reader));
+
     auto translation_result = co_await do_translation_for_range(
-      parent_rcn, std::move(kafka_reader), read_begin_offset);
+      parent_rcn, read_begin_offset, read_end_offset);
+
+    // release units and checkpoint outside of the lock.
     units.return_all();
     vlog(_logger.debug, "translation result: {}", translation_result);
     auto result = translation_success::no;
@@ -361,7 +437,7 @@ partition_translator::checkpoint_translated_data(
   retry_chain_node& rcn,
   kafka::offset reader_begin_offset,
   coordinator::translated_offset_range translated_range) {
-    if (translated_range.files.empty()) {
+    if (translated_range.files.empty() && translated_range.dlq_files.empty()) {
         co_return checkpoint_result::yes;
     }
     if (reader_begin_offset != translated_range.start_offset) {

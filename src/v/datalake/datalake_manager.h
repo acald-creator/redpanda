@@ -16,8 +16,11 @@
 #include "config/property.h"
 #include "container/chunked_hash_map.h"
 #include "datalake/fwd.h"
+#include "datalake/location.h"
+#include "datalake/record_schema_resolver.h"
 #include "datalake/translation/partition_translator.h"
 #include "features/fwd.h"
+#include "model/metadata.h"
 #include "pandaproxy/schema_registry/fwd.h"
 #include "raft/fwd.h"
 #include "ssx/semaphore.h"
@@ -74,8 +77,10 @@ private:
     std::chrono::milliseconds translation_interval_ms() const;
     void on_group_notification(const model::ntp&);
     void start_translator(
-      ss::lw_shared_ptr<cluster::partition>, model::iceberg_mode);
-    ss::future<> stop_translator(const model::ntp&);
+      ss::lw_shared_ptr<cluster::partition>,
+      model::iceberg_mode,
+      model::iceberg_invalid_record_action);
+    void stop_translator(const model::ntp&);
 
     model::node_id _self;
     ss::sharded<raft::group_manager>* _group_mgr;
@@ -87,11 +92,13 @@ private:
     ss::sharded<features::feature_table>* _features;
     ss::sharded<coordinator::frontend>* _coordinator_frontend;
     std::unique_ptr<datalake::cloud_data_io> _cloud_data_io;
+    location_provider _location_provider;
     std::unique_ptr<schema::registry> _schema_registry;
     std::unique_ptr<coordinator::catalog_factory> _catalog_factory;
     std::unique_ptr<iceberg::catalog> _catalog;
     std::unique_ptr<datalake::schema_manager> _schema_mgr;
     std::unique_ptr<datalake::type_resolver> _type_resolver;
+    std::unique_ptr<datalake::schema_cache> _schema_cache;
     ss::sharded<ss::abort_source>* _as;
     ss::scheduling_group _sg;
     ss::gate _gate;
@@ -102,6 +109,8 @@ private:
     using deferred_action = ss::deferred_action<std::function<void()>>;
     std::vector<deferred_action> _deregistrations;
     config::binding<std::chrono::milliseconds> _iceberg_commit_interval;
+    config::binding<model::iceberg_invalid_record_action>
+      _iceberg_invalid_record_action;
 
     // Translation requires buffering data batches in memory for efficient
     // output representation, this controls the maximum bytes buffered in memory

@@ -10,6 +10,7 @@
 #include "config/configuration.h"
 
 #include "base/units.h"
+#include "cluster/scheduling/topic_memory_per_partition_default.h"
 #include "config/base_property.h"
 #include "config/bounded_property.h"
 #include "config/node_config.h"
@@ -290,11 +291,11 @@ configuration::configuration()
       "topic_memory_per_partition",
       "Required memory per partition when creating topics.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
-      4_MiB,
+      cluster::DEFAULT_TOPIC_MEMORY_PER_PARTITION,
       {
         .min = 1,      // Must be nonzero, it's a divisor
         .max = 100_MiB // Rough 'sanity' limit: a machine with 1GB RAM must be
-                       // able to create at least 10 partitions})
+                       // able to create at least 10 partitions
       })
   , topic_fds_per_partition(
       *this,
@@ -313,7 +314,7 @@ configuration::configuration()
       "Maximum number of partitions which may be allocated to one shard (CPU "
       "core).",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
-      1000,
+      5000,
       {
         .min = 16,    // Forbid absurdly small values that would prevent most
                       // practical workloads from running
@@ -334,6 +335,16 @@ configuration::configuration()
       {
         .min = 0,     // It is not mandatory to reserve any capacity
         .max = 131072 // Same max as topic_partitions_per_shard
+      })
+  , topic_partitions_memory_allocation_percent(
+      *this,
+      "topic_partitions_memory_allocation_percent",
+      "Percentage of total memory to reserve for topic partitions.",
+      {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
+      10,
+      {
+        .min = 1,
+        .max = 80,
       })
   , partition_manager_shutdown_watchdog_timeout(
       *this,
@@ -478,7 +489,7 @@ configuration::configuration()
       "cannot change. When the total size of cached requests reaches the set "
       "limit, back pressure is applied to throttle producers.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
-      5_MiB,
+      0,
       {.min = 0, .max = 100_MiB})
   , enable_usage(
       *this,
@@ -537,28 +548,9 @@ configuration::configuration()
       "Quota manager GC frequency in milliseconds.",
       {.visibility = visibility::tunable},
       std::chrono::milliseconds(30000))
-  , target_quota_byte_rate(
-      *this,
-      "target_quota_byte_rate",
-      "Target request size quota byte rate (bytes per second)",
-      {.needs_restart = needs_restart::no,
-       .example = "1073741824",
-       .visibility = visibility::user},
-      target_produce_quota_byte_rate_default,
-      {.min = 0})
-  , target_fetch_quota_byte_rate(
-      *this,
-      "target_fetch_quota_byte_rate",
-      "Target fetch size quota byte rate (bytes per second) - disabled default",
-      {.needs_restart = needs_restart::no, .visibility = visibility::user},
-      std::nullopt)
-  , kafka_admin_topic_api_rate(
-      *this,
-      "kafka_admin_topic_api_rate",
-      "Target quota rate (partition mutations per default_window_sec)",
-      {.needs_restart = needs_restart::no, .visibility = visibility::user},
-      std::nullopt,
-      {.min = 1})
+  , target_quota_byte_rate(*this, "target_quota_byte_rate")
+  , target_fetch_quota_byte_rate(*this, "target_fetch_quota_byte_rate")
+  , kafka_admin_topic_api_rate(*this, "kafka_admin_topic_api_rate")
   , cluster_id(
       *this,
       "cluster_id",
@@ -841,6 +833,12 @@ configuration::configuration()
       *this,
       "use_fetch_scheduler_group",
       "Use a separate scheduler group for fetch processing.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+      true)
+  , use_produce_scheduler_group(
+      *this,
+      "use_produce_scheduler_group",
+      "Use a separate scheduler group for kafka produce requests processing.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       true)
   , metadata_status_wait_timeout_ms(
@@ -1340,7 +1338,7 @@ configuration::configuration()
       {.needs_restart = needs_restart::no,
        .example = "1",
        .visibility = visibility::tunable},
-      10)
+      1)
   , segment_fallocation_step(
       *this,
       "segment_fallocation_step",
@@ -1500,7 +1498,8 @@ configuration::configuration()
       std::vector<ss::sstring>{"GSSAPI", "OAUTHBEARER"},
       "sasl_mechanisms",
       "A list of supported SASL mechanisms. Accepted values: `SCRAM`, "
-      "`GSSAPI`, `OAUTHBEARER`.",
+      "`GSSAPI`, `OAUTHBEARER`, `PLAIN`.  Note that in order to enable PLAIN, "
+      "you must also enable SCRAM.",
       meta{
         .needs_restart = needs_restart::no,
         .visibility = visibility::user,
@@ -1689,28 +1688,9 @@ configuration::configuration()
       {},
       validate_connection_rate)
   , kafka_client_group_byte_rate_quota(
-      *this,
-      "kafka_client_group_byte_rate_quota",
-      "Per-group target produce quota byte rate (bytes per second). Client is "
-      "considered part of the group if client_id contains clients_prefix.",
-      {.needs_restart = needs_restart::no,
-       .example
-       = R"([{'group_name': 'first_group','clients_prefix': 'group_1','quota': 10240}])",
-       .visibility = visibility::user},
-      {},
-      validate_client_groups_byte_rate_quota)
+      *this, "kafka_client_group_byte_rate_quota")
   , kafka_client_group_fetch_byte_rate_quota(
-      *this,
-      "kafka_client_group_fetch_byte_rate_quota",
-      "Per-group target fetch quota byte rate (bytes per second). "
-      "Client is considered part of the group if client_id contains "
-      "clients_prefix",
-      {.needs_restart = needs_restart::no,
-       .example
-       = R"([{'group_name': 'first_group','clients_prefix': 'group_1','quota': 10240}])",
-       .visibility = visibility::user},
-      {},
-      validate_client_groups_byte_rate_quota)
+      *this, "kafka_client_group_fetch_byte_rate_quota")
   , kafka_rpc_server_tcp_recv_buf(
       *this,
       "kafka_rpc_server_tcp_recv_buf",
@@ -2399,13 +2379,15 @@ configuration::configuration()
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       false)
   , cloud_storage_disable_metadata_consistency_checks(
+      *this, "cloud_storage_disable_metadata_consistency_checks")
+  , cloud_storage_disable_archival_stm_rw_fence(
       *this,
-      "cloud_storage_disable_metadata_consistency_checks",
-      "Disable all metadata consistency checks. This will allow redpanda to "
-      "replay logs with inconsistent tiered-storage metadata. Normally, this "
-      "option should be disabled.",
+      "cloud_storage_disable_archival_stm_rw_fence",
+      "Disable concurrency control mechanism in the Tiered-Storage. This could "
+      "potentially break the metadata consistency and shouldn't be used in "
+      "production systems. It should only be used for testing.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
-      true)
+      false)
   , cloud_storage_hydration_timeout_ms(
       *this,
       "cloud_storage_hydration_timeout_ms",
@@ -3515,6 +3497,12 @@ configuration::configuration()
       "Normalize schemas as they are read from the topic on startup.",
       {.needs_restart = needs_restart::yes, .visibility = visibility::user},
       false)
+  , schema_registry_protobuf_renderer_v2(
+      *this,
+      "schema_registry_protobuf_renderer_v2",
+      "Enables experimental protobuf renderer to support normalize=true.",
+      {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
+      false)
   , pp_sr_smp_max_non_local_requests(
       *this,
       "pp_sr_smp_max_non_local_requests",
@@ -3680,6 +3668,15 @@ configuration::configuration()
        tls_version::v1_1,
        tls_version::v1_2,
        tls_version::v1_3})
+  , tls_enable_renegotiation(
+      *this,
+      "tls_enable_renegotiation",
+      "TLS client-initiated renegotiation is considered unsafe and is by "
+      "default disabled.  Only re-enable it if you are experiencing issues "
+      "with your TLS-enabled client.  This option has no effect on TLSv1.3 "
+      "connections as client-initiated renegotiation was removed.",
+      {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
+      false)
   , iceberg_enabled(
       *this,
       "iceberg_enabled",
@@ -3803,6 +3800,26 @@ configuration::configuration()
       "the topic.",
       {.needs_restart = needs_restart::no, .visibility = visibility::user},
       true)
+  , iceberg_default_partition_spec(
+      *this,
+      "iceberg_default_partition_spec",
+      "Default value for the redpanda.iceberg.partition.spec topic property "
+      "that determines the partition spec for the Iceberg table corresponding "
+      "to the topic.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::user},
+      "(hour(redpanda.timestamp))",
+      &validate_iceberg_partition_spec)
+  , iceberg_invalid_record_action(
+      *this,
+      "iceberg_invalid_record_action",
+      "Default value for the redpanda.iceberg.invalid.record.action topic "
+      "property.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::user},
+      model::iceberg_invalid_record_action::dlq_table,
+      {
+        model::iceberg_invalid_record_action::drop,
+        model::iceberg_invalid_record_action::dlq_table,
+      })
   , development_enable_cloud_topics(
       *this,
       "development_enable_cloud_topics",

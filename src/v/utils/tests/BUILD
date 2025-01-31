@@ -115,8 +115,7 @@ redpanda_cc_gtest(
 )
 
 redpanda_cc_bench(
-    name = "vint_bench",
-    timeout = "short",
+    name = "vint_rpbench",
     srcs = [
         "vint_bench.cc",
     ],
@@ -259,8 +258,7 @@ redpanda_cc_btest(
 )
 
 redpanda_cc_bench(
-    name = "coro_bench",
-    timeout = "short",
+    name = "coro_rpbench",
     srcs = [
         "coro_bench.cc",
     ],
@@ -273,8 +271,7 @@ redpanda_cc_bench(
 )
 
 redpanda_cc_bench(
-    name = "seastar_histogram_bench",
-    timeout = "short",
+    name = "seastar_histogram_rpbench",
     srcs = [
         "seastar_histogram_bench.cc",
     ],
@@ -483,8 +480,7 @@ redpanda_cc_btest(
 )
 
 redpanda_cc_bench(
-    name = "delta_for_bench",
-    timeout = "short",
+    name = "delta_for_rpbench",
     srcs = [
         "delta_for_bench.cc",
     ],
@@ -510,6 +506,27 @@ redpanda_cc_gtest(
         "//src/v/test_utils:gtest",
         "//src/v/utils:external_process",
         "@googletest//:gtest",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_gtest(
+    name = "s3_fifo_test",
+    timeout = "short",
+    srcs = ["s3_fifo_test.cc"],
+    deps = [
+        "//src/v/test_utils:gtest",
+        "//src/v/utils:s3_fifo",
+    ],
+)
+
+redpanda_cc_gtest(
+    name = "chunked_kv_cache_test",
+    timeout = "short",
+    srcs = ["chunked_kv_cache_test.cc"],
+    deps = [
+        "//src/v/test_utils:gtest",
+        "//src/v/utils:chunked_kv_cache",
         "@seastar",
     ],
 )

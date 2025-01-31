@@ -13,6 +13,7 @@
 #include "cluster/partition_manager.h"
 #include "cluster/topic_table.h"
 #include "cluster/types.h"
+#include "config/configuration.h"
 #include "datalake/catalog_schema_manager.h"
 #include "datalake/cloud_data_io.h"
 #include "datalake/coordinator/catalog_factory.h"
@@ -29,8 +30,8 @@ namespace datalake {
 
 namespace {
 
-static std::unique_ptr<type_resolver>
-make_type_resolver(model::iceberg_mode mode, schema::registry& sr) {
+static std::unique_ptr<type_resolver> make_type_resolver(
+  model::iceberg_mode mode, schema::registry& sr, schema_cache& cache) {
     switch (mode) {
     case model::iceberg_mode::disabled:
         vassert(
@@ -39,7 +40,7 @@ make_type_resolver(model::iceberg_mode mode, schema::registry& sr) {
     case model::iceberg_mode::key_value:
         return std::make_unique<binary_type_resolver>();
     case model::iceberg_mode::value_schema_id_prefix:
-        return std::make_unique<record_schema_resolver>(sr);
+        return std::make_unique<record_schema_resolver>(sr, cache);
     }
 }
 
@@ -84,17 +85,25 @@ datalake_manager::datalake_manager(
   , _shards(shards)
   , _features(features)
   , _coordinator_frontend(frontend)
-  , _cloud_data_io(std::make_unique<cloud_data_io>(
-      cloud_io->local(), std::move(bucket_name)))
+  , _cloud_data_io(
+      std::make_unique<cloud_data_io>(cloud_io->local(), bucket_name))
+  , _location_provider(cloud_io->local().provider(), bucket_name)
   , _schema_registry(schema::registry::make_default(sr_api))
   , _catalog_factory(std::move(catalog_factory))
   , _type_resolver(std::make_unique<record_schema_resolver>(*_schema_registry))
+  // TODO: The cache size is currently arbitrary. Figure out a more reasoned
+  // size and allocate a share of the datalake memory semaphore to this cache.
+  , _schema_cache(std::make_unique<chunked_schema_cache>(
+      chunked_schema_cache::cache_t::config{
+        .cache_size = 50, .small_size = 10}))
   , _as(as)
   , _sg(sg)
   , _effective_max_translator_buffered_data(
       std::min(memory_limit, max_translator_buffered_data))
   , _iceberg_commit_interval(
-      config::shard_local_cfg().iceberg_catalog_commit_interval_ms.bind()) {
+      config::shard_local_cfg().iceberg_catalog_commit_interval_ms.bind())
+  , _iceberg_invalid_record_action(
+      config::shard_local_cfg().iceberg_invalid_record_action.bind()) {
     vassert(memory_limit > 0, "Memory limit must be greater than 0");
     auto max_parallel = static_cast<size_t>(
       std::floor(memory_limit / _effective_max_translator_buffered_data));
@@ -126,9 +135,7 @@ ss::future<> datalake_manager::start() {
       = _partition_mgr->local().register_unmanage_notification(
         model::kafka_namespace, [this](model::topic_partition_view tp) {
             model::ntp ntp{model::kafka_namespace, tp.topic, tp.partition};
-            ssx::spawn_with_gate(_gate, [this, ntp = std::move(ntp)] {
-                return stop_translator(ntp);
-            });
+            stop_translator(ntp);
         });
     // Handle leadership changes
     auto leadership_registration
@@ -143,7 +150,8 @@ ss::future<> datalake_manager::start() {
             }
         });
 
-    // Handle topic properties changes (iceberg_mode)
+    // Handle topic properties changes (iceberg_mode,
+    // iceberg_invalid_record_action)
     auto topic_properties_registration
       = _topic_table->local().register_ntp_delta_notification(
         [this](cluster::topic_table::ntp_delta_range_t range) {
@@ -180,6 +188,19 @@ ss::future<> datalake_manager::start() {
             }
         });
     });
+    _iceberg_invalid_record_action.watch([this] {
+        // Copy the keys to avoid iterator invalidation.
+        chunked_vector<model::ntp> ntps;
+        ntps.reserve(_translators.size());
+        for (const auto& [ntp, _] : _translators) {
+            ntps.push_back(ntp);
+        }
+
+        for (const auto& ntp : ntps) {
+            on_group_notification(ntp);
+        }
+    });
+    _schema_cache->start();
 }
 
 ss::future<> datalake_manager::stop() {
@@ -190,6 +211,7 @@ ss::future<> datalake_manager::stop() {
           return entry.second->stop();
       });
     co_await std::move(f);
+    _schema_cache->stop();
 }
 
 std::chrono::milliseconds datalake_manager::translation_interval_ms() const {
@@ -217,27 +239,47 @@ void datalake_manager::on_group_notification(const model::ntp& ntp) {
                             == model::iceberg_mode::disabled;
     if (!partition->is_leader() || iceberg_disabled) {
         if (it != _translators.end()) {
-            ssx::spawn_with_gate(_gate, [this, partition] {
-                return stop_translator(partition->ntp());
-            });
+            stop_translator(partition->ntp());
         }
         return;
     }
+
     // By now we know the partition is a leader and iceberg is enabled, so
     // there has to be a translator, spin one up if it doesn't already exist.
     if (it == _translators.end()) {
-        start_translator(partition, topic_cfg->properties.iceberg_mode);
+        start_translator(
+          partition,
+          topic_cfg->properties.iceberg_mode,
+          topic_cfg->properties.iceberg_invalid_record_action.value_or(
+            config::shard_local_cfg().iceberg_invalid_record_action.value()));
     } else {
         // check if translation interval changed.
         auto target_interval = translation_interval_ms();
         if (it->second->translation_interval() != target_interval) {
             it->second->reset_translation_interval(target_interval);
         }
+
+        // check if invalid record action changed.
+        auto target_action
+          = topic_cfg->properties.iceberg_invalid_record_action.value_or(
+            config::shard_local_cfg().iceberg_invalid_record_action.value());
+
+        vlog(
+          datalake_log.warn,
+          "Invalid record action: {} vs {}",
+          target_action,
+          it->second->invalid_record_action());
+
+        if (it->second->invalid_record_action() != target_action) {
+            it->second->reset_invalid_record_action(target_action);
+        }
     }
 }
 
 void datalake_manager::start_translator(
-  ss::lw_shared_ptr<cluster::partition> partition, model::iceberg_mode mode) {
+  ss::lw_shared_ptr<cluster::partition> partition,
+  model::iceberg_mode mode,
+  model::iceberg_invalid_record_action invalid_record_action) {
     auto it = _translators.find(partition->ntp());
     vassert(
       it == _translators.end(),
@@ -250,24 +292,35 @@ void datalake_manager::start_translator(
       _coordinator_frontend,
       _features,
       &_cloud_data_io,
+      _location_provider,
       _schema_mgr.get(),
-      make_type_resolver(mode, *_schema_registry),
+      make_type_resolver(mode, *_schema_registry, *_schema_cache),
       make_record_translator(mode),
       translation_interval_ms(),
       _sg,
       _effective_max_translator_buffered_data,
-      &_parallel_translations);
+      &_parallel_translations,
+      invalid_record_action);
     _translators.emplace(partition->ntp(), std::move(translator));
 }
 
-ss::future<> datalake_manager::stop_translator(const model::ntp& ntp) {
+void datalake_manager::stop_translator(const model::ntp& ntp) {
+    if (_gate.is_closed()) {
+        // Cleanup should be deferred to stop().
+        return;
+    }
     auto it = _translators.find(ntp);
     if (it == _translators.end()) {
-        co_return;
+        return;
     }
-    auto translator = std::move(it->second);
+    auto t = std::move(it->second);
     _translators.erase(it);
-    co_await translator->stop();
+    ssx::spawn_with_gate(_gate, [t = std::move(t)]() mutable {
+        // Keep 't' alive by capturing it into the finally below. Use the raw
+        // pointer here to avoid a user-after-move.
+        auto* t_ptr = t.get();
+        return t_ptr->stop().finally([_ = std::move(t)] {});
+    });
 }
 
 } // namespace datalake

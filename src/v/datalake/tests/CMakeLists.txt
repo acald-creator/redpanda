@@ -5,12 +5,16 @@ v_cc_library(
   NAME datalake_test_utils
   HDRS
     record_generator.h
+    test_utils.h
   SRCS
     record_generator.cc
+    test_utils.cc
   DEPS
     Avro::avro
     Seastar::seastar
+    protobuf::libprotobuf
     v::avro_test_utils
+    v::protobuf_test_utils
     v::schema
     v::schema_test_fixture
     v::storage
@@ -46,6 +50,7 @@ rp_test(
     v::bytes
     v::utils
     v::gtest_main
+    v::datalake_test_utils
     v::datalake_writer
     v::iceberg_test_utils
     v::schema
@@ -201,4 +206,33 @@ rp_test(
     v::avro_test_utils
   LABELS datalake
   ARGS "-- -c 1"
+)
+
+rp_test(
+  UNIT_TEST
+  GTEST
+  BINARY_NAME partition_spec_parser
+  SOURCES partition_spec_parser_test.cc
+  LIBRARIES
+    v::gtest_main
+    v::datalake_partition_spec_parser
+  LABELS datalake
+  ARGS "-- -c 1"
+)
+
+rp_test(
+  BENCHMARK_TEST
+  BINARY_NAME record_multiplexer
+  SOURCES record_multiplexer_bench.cc
+  LIBRARIES
+    Seastar::seastar_perf_testing
+    Boost::unit_test_framework
+    v::cloud_io_utils
+    v::application
+    v::datalake_test_utils
+    v::iceberg_test_utils
+    v::schema
+    v::s3_imposter
+  ARGS "-c 1 --duration=1 --runs=1 --memory=4G"
+  LABELS datalake
 )

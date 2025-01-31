@@ -121,6 +121,62 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "compatibility_types",
+    srcs = [
+        "compatibility_types.cc",
+    ],
+    hdrs = [
+        "compatibility_types.h",
+    ],
+    include_prefix = "iceberg",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":datatypes",
+        "//src/v/base",
+        "//src/v/ssx:sformat",
+        "@fmt",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "compatibility_utils",
+    srcs = [],
+    hdrs = [
+        "compatibility_utils.h",
+    ],
+    include_prefix = "iceberg",
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = [
+        ":compatibility_types",
+        ":datatypes",
+        ":field_collecting_visitor",
+        "//src/v/base",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "compatibility",
+    srcs = [
+        "compatibility.cc",
+    ],
+    hdrs = [
+        "compatibility.h",
+    ],
+    include_prefix = "iceberg",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compatibility_types",
+        ":compatibility_utils",
+        ":datatypes",
+        "//src/v/base",
+    ],
+)
+
+redpanda_cc_library(
     name = "datatypes_json",
     srcs = [
         "datatypes_json.cc",
@@ -135,6 +191,29 @@ redpanda_cc_library(
         ":json_writer",
         "//src/v/json",
         "//src/v/strings:string_switch",
+    ],
+)
+
+redpanda_cc_library(
+    name = "values_json",
+    srcs = [
+        "values_json.cc",
+    ],
+    hdrs = [
+        "values_json.h",
+    ],
+    include_prefix = "iceberg",
+    deps = [
+        ":datatypes",
+        ":json_utils",
+        ":json_writer",
+        ":values",
+        "//src/v/json",
+        "//src/v/strings:string_switch",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/time",
+        "@boost//:iostreams",
+        "@boost//:range",
     ],
 )
 
@@ -423,6 +502,9 @@ redpanda_cc_library(
 
 redpanda_cc_library(
     name = "partition",
+    srcs = [
+        "partition.cc",
+    ],
     hdrs = [
         "partition.h",
     ],
@@ -431,6 +513,7 @@ redpanda_cc_library(
     deps = [
         ":datatypes",
         ":transform",
+        ":unresolved_partition_spec",
         "//src/v/container:fragmented_vector",
         "//src/v/utils:named_type",
         "@seastar",
@@ -509,6 +592,32 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "remove_snapshots_action",
+    srcs = [
+        "remove_snapshots_action.cc",
+    ],
+    hdrs = [
+        "remove_snapshots_action.h",
+    ],
+    implementation_deps = [
+        ":logger",
+        ":snapshot",
+        ":table_update",
+        "//src/v/base",
+        "//src/v/container:chunked_hash_map",
+    ],
+    include_prefix = "iceberg",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":action",
+        ":table_metadata",
+        "//src/v/container:fragmented_vector",
+        "//src/v/model",
+        "//src/v/utils:prefix_logger",
+    ],
+)
+
+redpanda_cc_library(
     name = "schema",
     srcs = [
         "schema.cc",
@@ -523,6 +632,7 @@ redpanda_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":datatypes",
+        "//src/v/base",
         "//src/v/container:chunked_hash_map",
         "//src/v/utils:named_type",
         "@abseil-cpp//absl/container:btree",
@@ -660,6 +770,7 @@ redpanda_cc_library(
     deps = [
         "//src/v/base",
         "//src/v/container:fragmented_vector",
+        "@boost//:container_hash",
         "@seastar",
     ],
 )
@@ -856,6 +967,7 @@ redpanda_cc_library(
         "transaction.h",
     ],
     implementation_deps = [
+        ":remove_snapshots_action",
         ":table_update_applier",
         ":update_schema_action",
     ],
@@ -882,6 +994,9 @@ redpanda_cc_library(
     ],
     hdrs = [
         "transform.h",
+    ],
+    implementation_deps = [
+        "@fmt",
     ],
     include_prefix = "iceberg",
     visibility = ["//visibility:public"],
@@ -920,6 +1035,23 @@ redpanda_cc_library(
         ":time_transform_visitor",
         ":transform",
         ":values",
+    ],
+)
+
+redpanda_cc_library(
+    name = "unresolved_partition_spec",
+    srcs = [
+        "unresolved_partition_spec.cc",
+    ],
+    hdrs = [
+        "unresolved_partition_spec.h",
+    ],
+    include_prefix = "iceberg",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":transform",
+        "//src/v/container:fragmented_vector",
+        "@seastar",
     ],
 )
 
@@ -1100,6 +1232,7 @@ redpanda_cc_library(
         "//src/v/thirdparty/ada",
     ],
     include_prefix = "iceberg",
+    visibility = ["//visibility:public"],
     deps = [
         "//src/v/base",
         "//src/v/cloud_io:provider",

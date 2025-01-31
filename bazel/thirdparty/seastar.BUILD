@@ -243,6 +243,7 @@ cc_library(
         "src/core/scollectd-impl.hh",
         "src/core/semaphore.cc",
         "src/core/sharded.cc",
+        "src/core/signal.cc",
         "src/core/smp.cc",
         "src/core/sstring.cc",
         "src/core/syscall_result.hh",
@@ -409,6 +410,7 @@ cc_library(
         "include/seastar/core/shared_ptr.hh",
         "include/seastar/core/shared_ptr_debug_helper.hh",
         "include/seastar/core/shared_ptr_incomplete.hh",
+        "include/seastar/core/signal.hh",
         "include/seastar/core/simple-stream.hh",
         "include/seastar/core/slab.hh",
         "include/seastar/core/sleep.hh",
@@ -432,6 +434,7 @@ cc_library(
         "include/seastar/core/vector-data-sink.hh",
         "include/seastar/core/weak_ptr.hh",
         "include/seastar/core/when_all.hh",
+        "include/seastar/core/when_any.hh",
         "include/seastar/core/with_scheduling_group.hh",
         "include/seastar/core/with_timeout.hh",
         "include/seastar/coroutine/all.hh",
@@ -560,6 +563,7 @@ cc_library(
         "SEASTAR_API_LEVEL=$(API_LEVEL)",
         "SEASTAR_SCHEDULING_GROUPS_COUNT=$(SCHEDULING_GROUPS)",
         "SEASTAR_WITH_TLS_OSSL",
+        "SEASTAR_DEPRECATED_OSTREAM_FORMATTERS",
     ] + select({
         ":use_task_backtrace": ["SEASTAR_TASK_BACKTRACE"],
         "//conditions:default": [],
@@ -570,8 +574,21 @@ cc_library(
         ":use_logger_compile_time_fmt": ["SEASTAR_LOGGER_COMPILE_TIME_FMT"],
         "//conditions:default": [],
     }) + select({
-        ":with_debug": ["SEASTAR_DEBUG"],
+        ":with_debug": [
+            "SEASTAR_DEBUG",
+            "SEASTAR_DEBUG_PROMISE",
+            "SEASTAR_DEBUG_SHARED_PTR",
+            "SEASTAR_TYPE_ERASE_MORE",
+        ],
         "//conditions:default": [],
+    }) + select({
+        # This isn't the best way to check this, but is the only way I can
+        # currently think of to replicate this behavior in Bazel. In CMake
+        # seastar only enables this if CMAKE_BUILD_SHARED_LIBS is enabled.
+        "@//bazel:optimized_build": [],
+        "//conditions:default": [
+            "SEASTAR_BUILD_SHARED_LIBS",
+        ],
     }),
     includes = [
         "include",

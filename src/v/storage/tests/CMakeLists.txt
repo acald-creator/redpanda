@@ -37,6 +37,7 @@ rp_test(
     file_sanitizer_test.cc
     compaction_reducer_test.cc
     batch_consumer_utils_test.cc
+    compaction_fuzz_test.cc
   LIBRARIES v::seastar_testing_main v::storage_test_utils v::model_test_utils
   LABELS storage
   ARGS "-- -c 1"
@@ -163,6 +164,16 @@ rp_test(
   BINARY_NAME gtest_storage_e2e
   SOURCES compaction_e2e_test.cc
   LIBRARIES  v::application v::features v::gtest_main v::kafka_test_utils
+  LABELS storage
+  ARGS "-- -c 1"
+)
+
+rp_test(
+  FIXTURE_TEST
+  GTEST
+  BINARY_NAME gtest_compaction_reducer
+  SOURCES compaction_reducer_fixture_test.cc
+  LIBRARIES  v::application v::features v::gtest_main v::storage_test_utils
   LABELS storage
   ARGS "-- -c 1"
 )

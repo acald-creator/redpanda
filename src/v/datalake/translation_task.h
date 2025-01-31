@@ -14,6 +14,8 @@
 #include "datalake/coordinator/translated_offset_range.h"
 #include "datalake/data_writer_interface.h"
 #include "datalake/fwd.h"
+#include "datalake/location.h"
+#include "model/metadata.h"
 #include "model/record_batch_reader.h"
 #include "utils/lazy_abort_source.h"
 #include "utils/retry_chain_node.h"
@@ -30,11 +32,17 @@ public:
       schema_manager& schema_mgr,
       type_resolver& type_resolver,
       record_translator& record_translator,
-      table_creator&);
+      table_creator&,
+      model::iceberg_invalid_record_action,
+      location_provider);
     enum class errc {
         file_io_error,
         cloud_io_error,
     };
+
+    using custom_partitioning_enabled
+      = ss::bool_class<struct custom_partitioning_enabled_t>;
+
     /**
      * Executes the translation and uploads files to the object store. The tasks
      * accepts an abort source indicating when the upload retires should be
@@ -44,6 +52,7 @@ public:
       const model::ntp& ntp,
       model::revision_id topic_revision,
       std::unique_ptr<parquet_file_writer_factory> writer_factory,
+      custom_partitioning_enabled is_custom_partitioning_enabled,
       model::record_batch_reader reader,
       const remote_path& remote_path_prefix,
       retry_chain_node& parent_rcn,
@@ -52,17 +61,8 @@ public:
 private:
     friend std::ostream& operator<<(std::ostream&, errc);
 
-    ss::future<checked<remote_path, errc>> execute_single_upload(
-      const local_file_metadata& lf_meta,
-      const remote_path& remote_path_prefix,
-      retry_chain_node& parent_rcn,
-      lazy_abort_source& lazy_as);
-
     ss::future<errc> delete_remote_files(
       chunked_vector<remote_path>, retry_chain_node& parent_rcn);
-
-    ss::future<checked<std::nullopt_t, errc>>
-    delete_local_data_files(const chunked_vector<local_file_metadata>&);
 
     static constexpr std::chrono::milliseconds _read_timeout{30000};
     cloud_data_io* _cloud_io;
@@ -70,5 +70,7 @@ private:
     type_resolver* _type_resolver;
     record_translator* _record_translator;
     table_creator* _table_creator;
+    model::iceberg_invalid_record_action _invalid_record_action;
+    location_provider _location_provider;
 };
 } // namespace datalake

@@ -103,6 +103,7 @@
 #include <seastar/core/map_reduce.hh>
 #include <seastar/core/prometheus.hh>
 #include <seastar/core/reactor.hh>
+#include <seastar/core/shard_id.hh>
 #include <seastar/core/sharded.hh>
 #include <seastar/core/shared_ptr.hh>
 #include <seastar/core/smp.hh>
@@ -3261,6 +3262,17 @@ admin_server::cancel_all_partitions_reconfigs_handler(
       co_await map_partition_results(std::move(res.value())));
 }
 
+ss::future<ss::json::json_return_type>
+admin_server::get_metrics_uuid(std::unique_ptr<ss::http::request>) {
+    vlog(adminlog.debug, "Requested metrics UUID");
+    ss::httpd::cluster_json::metrics_uuid ret;
+    ret.uuid = co_await _controller->get_controller_stm().invoke_on(
+      0, ([](cluster::controller_stm& s) {
+          return s.get_metrics_reporter_cluster_info().uuid;
+      }));
+    co_return ss::json::json_return_type(std::move(ret));
+}
+
 static json::validator make_post_cluster_partitions_validator() {
     const std::string schema = R"(
 {
@@ -3345,6 +3357,7 @@ struct cluster_partition_info {
     ss::lw_shared_ptr<model::topic_namespace> ns_tp;
     model::partition_id id;
     std::vector<model::broker_shard> replicas;
+    std::optional<model::node_id> leader_id;
     bool disabled = false;
 
     ss::httpd::cluster_json::cluster_partition to_json() const {
@@ -3357,6 +3370,9 @@ struct cluster_partition_info {
             a.node_id = r.node_id;
             a.core = r.shard;
             ret.replicas.push(a);
+        }
+        if (leader_id) {
+            ret.leader_id = leader_id.value();
         }
         ret.disabled = disabled;
         return ret;
@@ -3371,6 +3387,7 @@ using cluster_partitions_t
 cluster_partitions_t topic2cluster_partitions(
   model::topic_namespace ns_tp,
   const cluster::assignments_set& assignments,
+  const cluster::metadata_cache& md_cache,
   const cluster::topic_disabled_partitions_set* disabled_set,
   std::optional<bool> disabled_filter) {
     cluster_partitions_t ret;
@@ -3412,6 +3429,7 @@ cluster_partitions_t topic2cluster_partitions(
                 .ns_tp = shared_ns_tp,
                 .id = id,
                 .replicas = as_it->second.replicas,
+                .leader_id = md_cache.get_leader_id(*shared_ns_tp, id),
                 .disabled = true,
               });
         }
@@ -3429,6 +3447,7 @@ cluster_partitions_t topic2cluster_partitions(
                 .ns_tp = shared_ns_tp,
                 .id = p_as.id,
                 .replicas = p_as.replicas,
+                .leader_id = md_cache.get_leader_id(*shared_ns_tp, p_as.id),
                 .disabled = disabled,
               });
         }
@@ -3534,6 +3553,7 @@ admin_server::get_cluster_partitions_handler(
         auto topic_partitions = topic2cluster_partitions(
           ns_tp,
           topic_it->second.get_assignments(),
+          _metadata_cache.local(),
           topics_state.get_topic_disabled_set(ns_tp),
           disabled_filter);
 
@@ -3577,6 +3597,7 @@ admin_server::get_cluster_partitions_topic_handler(
     auto partitions = topic2cluster_partitions(
       ns_tp,
       topic_it->second.get_assignments(),
+      _metadata_cache.local(),
       topics_state.get_topic_disabled_set(ns_tp),
       disabled_filter);
 
@@ -3682,6 +3703,12 @@ void admin_server::register_cluster_routes() {
               return ss::json::json_return_type(std::move(ret));
           }
           return ss::json::json_return_type(ss::json::json_void());
+      });
+
+    register_route<publik>(
+      ss::httpd::cluster_json::get_metrics_uuid,
+      [this](std::unique_ptr<ss::http::request> req) {
+          return get_metrics_uuid(std::move(req));
       });
 
     register_cluster_partitions_routes();
@@ -4338,6 +4365,14 @@ admin_server::delete_cloud_storage_lifecycle(
 ss::future<ss::json::json_return_type>
 admin_server::post_cloud_storage_cache_trim(
   std::unique_ptr<ss::http::request> req) {
+    co_await ss::smp::submit_to(ss::shard_id{0}, [this] {
+        if (!_cloud_storage_cache.local_is_initialized()) {
+            throw ss::httpd::bad_request_exception(
+              "Cloud Storage Cache is not available. Is cloud storage "
+              "enabled?");
+        }
+    });
+
     auto max_objects = get_integer_query_param(*req, "objects");
     auto max_bytes = static_cast<std::optional<size_t>>(
       get_integer_query_param(*req, "bytes"));

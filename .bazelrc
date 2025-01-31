@@ -4,6 +4,10 @@ common --extra_toolchains=@llvm_18_toolchain//:all
 common --@toolchains_llvm//toolchain/config:libunwind=False
 common --@toolchains_llvm//toolchain/config:compiler-rt=False
 build --linkopt --unwindlib=libgcc
+build --linkopt -stdlib=libc++
+
+# By default build without CGO
+build --@rules_go//go/config:pure
 
 common:clang-19 --extra_toolchains=@llvm_19_toolchain//:all
 
@@ -47,8 +51,12 @@ build:sanitizer --linkopt -fsanitize=address,undefined,vptr,function
 build:sanitizer --linkopt --rtlib=compiler-rt
 build:sanitizer --linkopt -fsanitize-link-c++-runtime
 build:sanitizer --copt -O1
+build:sanitizer --//bazel:has_sanitizers=True
 # seastar has to be run with system allocator when using sanitizers
 build:sanitizer --@seastar//:system_allocator=True
+# This is currently required to get ASAN to work, but ideally in the future we can get
+# the sanitizers working in release mode
+build:sanitizer --@seastar//:debug=true
 # krb5 is a foreign cc build and needs explicit list of sanitizers to build the shared library
 build:sanitizer --@krb5//:sanitizers=address,undefined,vptr,function
 
@@ -120,8 +128,5 @@ test --test_output=errors
 
 # warn if a timeout is much longer than actual runtime
 test --test_verbose_timeout_warnings
-
-test:unit --test_tag_filters=-bench
-test:bench --test_tag_filters=bench
 
 try-import %workspace%/user.bazelrc

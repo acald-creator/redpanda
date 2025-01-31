@@ -555,6 +555,8 @@ private:
       delete_partition_handler(std::unique_ptr<ss::http::request>);
     ss::future<ss::json::json_return_type>
       find_tx_coordinator_handler(std::unique_ptr<ss::http::request>);
+    ss::future<ss::json::json_return_type>
+      unsafe_abort_group_transaction(std::unique_ptr<ss::http::request>);
 
     /// Cluster routes
     ss::future<ss::json::json_return_type>
@@ -562,6 +564,8 @@ private:
     ss::future<ss::json::json_return_type>
       cancel_all_partitions_reconfigs_handler(
         std::unique_ptr<ss::http::request>);
+    ss::future<ss::json::json_return_type>
+      get_metrics_uuid(std::unique_ptr<ss::http::request>);
 
     /// Cluster partition routes
     ss::future<ss::json::json_return_type>
@@ -617,6 +621,8 @@ private:
 
     ss::future<ss::json::json_return_type>
       get_partition_state_handler(std::unique_ptr<ss::http::request>);
+    ss::future<ss::json::json_return_type>
+      get_producers_state_handler(std::unique_ptr<ss::http::request>);
     ss::future<ss::json::json_return_type>
       get_local_storage_usage_handler(std::unique_ptr<ss::http::request>);
     ss::future<ss::json::json_return_type>

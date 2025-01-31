@@ -83,7 +83,7 @@ create_topic_properties_update(
     std::apply(apply_op(op_t::none), update.custom_properties.serde_fields());
 
     static_assert(
-      std::tuple_size_v<decltype(update.properties.serde_fields())> == 32,
+      std::tuple_size_v<decltype(update.properties.serde_fields())> == 34,
       "If you added a property, please decide on it's default alter config "
       "policy, and handle the update in the loop below");
     static_assert(
@@ -370,7 +370,21 @@ create_topic_properties_update(
                   kafka::config_resource_operation::set);
                 continue;
             }
-
+            if (cfg.name == topic_property_iceberg_partition_spec) {
+                parse_and_set_optional(
+                  update.properties.iceberg_partition_spec,
+                  cfg.value,
+                  kafka::config_resource_operation::set,
+                  iceberg_partition_spec_validator{});
+                continue;
+            }
+            if (cfg.name == topic_property_iceberg_invalid_record_action) {
+                parse_and_set_optional(
+                  update.properties.iceberg_invalid_record_action,
+                  cfg.value,
+                  kafka::config_resource_operation::set);
+                continue;
+            }
         } catch (const validation_error& e) {
             return make_error_alter_config_resource_response<
               alter_configs_resource_response>(

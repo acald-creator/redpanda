@@ -1,11 +1,12 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #include "iceberg/filesystem_catalog.h"
 
 #include "iceberg/manifest_entry.h"
@@ -130,6 +131,13 @@ filesystem_catalog::drop_table(const table_identifier& table_id, bool) {
 ss::future<checked<std::nullopt_t, catalog::errc>>
 filesystem_catalog::commit_txn(
   const table_identifier& table_ident, transaction txn) {
+    if (txn.updates().updates.empty()) {
+        vlog(
+          log.debug,
+          "Transaction has no updates to table {}, returning early",
+          table_ident.table);
+        co_return std::nullopt;
+    }
     auto current_tmeta = co_await read_table_meta(table_ident);
     if (current_tmeta.has_error()) {
         co_return current_tmeta.error();

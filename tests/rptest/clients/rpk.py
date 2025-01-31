@@ -956,7 +956,7 @@ class RpkTool:
 
     def group_delete(self, group):
         cmd = ["delete", group]
-        self._run_group(cmd)
+        return self._run_group(cmd)
 
     def group_list(self, states: list[str] = []) -> list[RpkListGroup]:
         cmd = ['list']
@@ -1149,6 +1149,7 @@ class RpkTool:
         if timeout is None:
             timeout = DEFAULT_TIMEOUT
 
+        cmd += ['-X', f'globals.request_timeout_overhead={timeout}s']
         # Unconditionally enable verbose logging
         cmd += ['-v']
 
@@ -1301,7 +1302,7 @@ class RpkTool:
         flags += self._tls_settings()
         return flags
 
-    def acl_list(self, flags: list[str] = [], request_timeout_overhead=None):
+    def acl_list(self, flags: list[str] = []):
         """
         Run `rpk acl list` and return the results.
 
@@ -1317,13 +1318,6 @@ class RpkTool:
             "acl",
             "list",
         ] + flags + self._kafka_conn_settings()
-
-        # How long rpk will wait for a response from the broker, default is 5s
-        if request_timeout_overhead is not None:
-            cmd += [
-                "-X", "globals.request_timeout_overhead=" +
-                f'{str(request_timeout_overhead)}s'
-            ]
 
         output = self._execute(cmd)
 
@@ -1624,11 +1618,7 @@ class RpkTool:
             ]
         return flags
 
-    def _run_registry(self,
-                      cmd,
-                      stdin=None,
-                      timeout=None,
-                      output_format="json"):
+    def _run_registry(self, cmd, stdin=None, timeout=60, output_format="json"):
         cmd = [self._rpk_binary(), "registry", "--format", output_format
                ] + self._schema_registry_conn_settings() + cmd
         out = self._execute(cmd, stdin=stdin, timeout=timeout)
@@ -1930,7 +1920,8 @@ class RpkTool:
                                 default=[],
                                 name=[],
                                 strict=False,
-                                output_format="json"):
+                                output_format="json",
+                                node: Optional[ClusterNode] = None):
         cmd = ["describe"]
 
         if strict:
@@ -1942,7 +1933,9 @@ class RpkTool:
         if len(name) > 0:
             cmd += ["--name", ",".join(name)]
 
-        return self._run_cluster_quotas(cmd, output_format=output_format)
+        return self._run_cluster_quotas(cmd,
+                                        output_format=output_format,
+                                        node=node)
 
     def alter_cluster_quotas(self,
                              add=[],

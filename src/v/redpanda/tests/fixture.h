@@ -10,9 +10,9 @@
  */
 
 #pragma once
+#include "cloud_io/tests/s3_imposter.h"
 #include "cloud_roles/types.h"
 #include "cloud_storage/configuration.h"
-#include "cloud_storage/tests/s3_imposter.h"
 #include "cloud_storage_clients/configuration.h"
 #include "cluster/archival/types.h"
 #include "cluster/cluster_utils.h"
@@ -104,7 +104,6 @@ public:
       configure_node_id use_node_id = configure_node_id::yes,
       const empty_seed_starts_cluster empty_seed_starts_cluster_val
       = empty_seed_starts_cluster::yes,
-      std::optional<uint32_t> kafka_admin_topic_api_rate = std::nullopt,
       bool enable_data_transforms = false,
       bool enable_legacy_upload_mode = true,
       bool iceberg_enabled = false)
@@ -125,7 +124,6 @@ public:
           std::move(cloud_cfg),
           use_node_id,
           empty_seed_starts_cluster_val,
-          kafka_admin_topic_api_rate,
           enable_data_transforms,
           enable_legacy_upload_mode,
           iceberg_enabled);
@@ -152,6 +150,7 @@ public:
             &configs,
             app.smp_service_groups.kafka_smp_sg(),
             app.sched_groups.fetch_sg(),
+            app.sched_groups.produce_sg(),
             std::ref(app.metadata_cache),
             std::ref(app.controller->get_topics_frontend()),
             std::ref(app.controller->get_config_frontend()),
@@ -336,7 +335,6 @@ public:
       configure_node_id use_node_id = configure_node_id::yes,
       const empty_seed_starts_cluster empty_seed_starts_cluster_val
       = empty_seed_starts_cluster::yes,
-      std::optional<uint32_t> kafka_admin_topic_api_rate = std::nullopt,
       bool data_transforms_enabled = false,
       bool legacy_upload_mode_enabled = true,
       bool iceberg_enabled = false) {
@@ -427,10 +425,6 @@ public:
                     static_cast<int16_t>(cloud_cfg->connection_limit()));
             }
 
-            if (kafka_admin_topic_api_rate) {
-                config.get("kafka_admin_topic_api_rate")
-                  .set_value(kafka_admin_topic_api_rate);
-            }
             config.get("data_transforms_enabled")
               .set_value(data_transforms_enabled);
             config.get("cloud_storage_disable_archiver_manager")

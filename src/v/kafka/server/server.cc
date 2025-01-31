@@ -20,6 +20,7 @@
 #include "features/enterprise_feature_messages.h"
 #include "features/feature_table.h"
 #include "kafka/protocol/errors.h"
+#include "kafka/protocol/produce.h"
 #include "kafka/protocol/schemata/list_groups_response.h"
 #include "kafka/server/connection_context.h"
 #include "kafka/server/coordinator_ntp_mapper.h"
@@ -65,6 +66,7 @@
 #include "security/gssapi_authenticator.h"
 #include "security/mtls.h"
 #include "security/oidc_authenticator.h"
+#include "security/plain_authenticator.h"
 #include "security/scram_algorithm.h"
 #include "security/scram_authenticator.h"
 #include "ssx/future-util.h"
@@ -117,6 +119,7 @@ server::server(
   ss::sharded<net::server_configuration>* cfg,
   ss::smp_service_group smp,
   ss::scheduling_group fetch_sg,
+  ss::scheduling_group produce_sg,
   ss::sharded<cluster::metadata_cache>& meta,
   ss::sharded<cluster::topics_frontend>& tf,
   ss::sharded<cluster::config_frontend>& cf,
@@ -143,6 +146,7 @@ server::server(
   : net::server(cfg, klog)
   , _smp_group(smp)
   , _fetch_scheduling_group(fetch_sg)
+  , _produce_scheduling_group(produce_sg)
   , _topics_frontend(tf)
   , _config_frontend(cf)
   , _feature_table(ft)
@@ -181,7 +185,7 @@ server::server(
         cfg->local().max_service_memory_per_core
         * config::shard_local_cfg().kafka_memory_share_for_fetch()),
       "kafka/server-mem-fetch")
-  , _probe(std::make_unique<class latency_probe>())
+  , _probe(std::make_unique<class kafka_probe>())
   , _sasl_probe(std::make_unique<class sasl_probe>())
   , _read_dist_probe(std::make_unique<read_distribution_probe>())
   , _thread_worker(tw)
@@ -223,6 +227,12 @@ void server::setup_metrics() {
 ss::scheduling_group server::fetch_scheduling_group() const {
     return config::shard_local_cfg().use_fetch_scheduler_group()
              ? _fetch_scheduling_group
+             : ss::default_scheduling_group();
+}
+
+ss::scheduling_group server::produce_scheduling_group() const {
+    return config::shard_local_cfg().use_produce_scheduler_group()
+             ? _produce_scheduling_group
              : ss::default_scheduling_group();
 }
 
@@ -716,6 +726,16 @@ ss::future<response_ptr> sasl_handshake_handler::handle(
           == security::scram_sha512_authenticator::name) {
             ctx.sasl()->set_mechanism(
               std::make_unique<security::scram_sha512_authenticator::auth>(
+                ctx.credentials()));
+        }
+    }
+
+    if (supports("PLAIN")) {
+        supported_sasl_mechanisms.emplace_back(
+          security::plain_authenticator::name);
+        if (request.data.mechanism == security::plain_authenticator::name) {
+            ctx.sasl()->set_mechanism(
+              std::make_unique<security::plain_authenticator>(
                 ctx.credentials()));
         }
     }

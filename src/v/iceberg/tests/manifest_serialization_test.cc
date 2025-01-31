@@ -1,11 +1,12 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 
 #include "base/units.h"
 #include "bytes/iobuf.h"
@@ -163,9 +164,9 @@ TEST(ManifestSerializationTest, TestManifestFile) {
     manifest.sequence_number = 3;
     manifest.min_sequence_number = 4;
     manifest.added_snapshot_id = 5;
-    manifest.added_data_files_count = 6;
-    manifest.existing_data_files_count = 7;
-    manifest.deleted_data_files_count = 8;
+    manifest.added_files_count = 6;
+    manifest.existing_files_count = 7;
+    manifest.deleted_files_count = 8;
     manifest.added_rows_count = 9;
     manifest.existing_rows_count = 10;
     manifest.deleted_rows_count = 11;
@@ -198,12 +199,9 @@ TEST(ManifestSerializationTest, TestManifestFile) {
     EXPECT_EQ(manifest.sequence_number, dmanifest.sequence_number);
     EXPECT_EQ(manifest.min_sequence_number, dmanifest.min_sequence_number);
     EXPECT_EQ(manifest.added_snapshot_id, dmanifest.added_snapshot_id);
-    EXPECT_EQ(
-      manifest.added_data_files_count, dmanifest.added_data_files_count);
-    EXPECT_EQ(
-      manifest.existing_data_files_count, dmanifest.existing_data_files_count);
-    EXPECT_EQ(
-      manifest.deleted_data_files_count, dmanifest.deleted_data_files_count);
+    EXPECT_EQ(manifest.added_files_count, dmanifest.added_files_count);
+    EXPECT_EQ(manifest.existing_files_count, dmanifest.existing_files_count);
+    EXPECT_EQ(manifest.deleted_files_count, dmanifest.deleted_files_count);
     EXPECT_EQ(manifest.added_rows_count, dmanifest.added_rows_count);
     EXPECT_EQ(manifest.existing_rows_count, dmanifest.existing_rows_count);
     EXPECT_EQ(manifest.deleted_rows_count, dmanifest.deleted_rows_count);
@@ -218,9 +216,9 @@ TEST(ManifestSerializationTest, TestManifestAvroReaderWriter) {
     manifest.sequence_number = 3;
     manifest.min_sequence_number = 4;
     manifest.added_snapshot_id = 5;
-    manifest.added_data_files_count = 6;
-    manifest.existing_data_files_count = 7;
-    manifest.deleted_data_files_count = 8;
+    manifest.added_files_count = 6;
+    manifest.existing_files_count = 7;
+    manifest.deleted_files_count = 8;
     manifest.added_rows_count = 9;
     manifest.existing_rows_count = 10;
     manifest.deleted_rows_count = 11;
@@ -264,12 +262,9 @@ TEST(ManifestSerializationTest, TestManifestAvroReaderWriter) {
     EXPECT_EQ(manifest.sequence_number, dmanifest.sequence_number);
     EXPECT_EQ(manifest.min_sequence_number, dmanifest.min_sequence_number);
     EXPECT_EQ(manifest.added_snapshot_id, dmanifest.added_snapshot_id);
-    EXPECT_EQ(
-      manifest.added_data_files_count, dmanifest.added_data_files_count);
-    EXPECT_EQ(
-      manifest.existing_data_files_count, dmanifest.existing_data_files_count);
-    EXPECT_EQ(
-      manifest.deleted_data_files_count, dmanifest.deleted_data_files_count);
+    EXPECT_EQ(manifest.added_files_count, dmanifest.added_files_count);
+    EXPECT_EQ(manifest.existing_files_count, dmanifest.existing_files_count);
+    EXPECT_EQ(manifest.deleted_files_count, dmanifest.deleted_files_count);
     EXPECT_EQ(manifest.added_rows_count, dmanifest.added_rows_count);
     EXPECT_EQ(manifest.existing_rows_count, dmanifest.existing_rows_count);
     EXPECT_EQ(manifest.deleted_rows_count, dmanifest.deleted_rows_count);

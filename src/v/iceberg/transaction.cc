@@ -1,14 +1,16 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #include "iceberg/transaction.h"
 
 #include "iceberg/merge_append_action.h"
+#include "iceberg/remove_snapshots_action.h"
 #include "iceberg/schema.h"
 #include "iceberg/table_requirement.h"
 #include "iceberg/table_update_applier.h"
@@ -73,6 +75,12 @@ ss::future<transaction::txn_outcome> transaction::merge_append(
   chunked_vector<std::pair<ss::sstring, ss::sstring>> snapshot_props) {
     auto a = std::make_unique<merge_append_action>(
       io, table_, std::move(files), std::move(snapshot_props));
+    co_return co_await apply(std::move(a));
+}
+
+ss::future<transaction::txn_outcome>
+transaction::remove_expired_snapshots(model::timestamp now) {
+    auto a = std::make_unique<remove_snapshots_action>(table_, now);
     co_return co_await apply(std::move(a));
 }
 

@@ -1,11 +1,12 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #pragma once
 
 #include "base/seastarx.h"
@@ -40,12 +41,25 @@ public:
       chunked_vector<data_file>,
       chunked_vector<std::pair<ss::sstring, ss::sstring>> snapshot_props = {});
 
+    // Removes expired snapshots from the table, computing expiration based on
+    // the given timestamp. Note, this does not perform IO to delete any
+    // now-orphaned metadata or data.
+    ss::future<txn_outcome> remove_expired_snapshots(model::timestamp now);
+
     std::optional<action::errc> error() const { return error_; }
 
     // NOTE: it is up to the caller to ensure the transaction has not hit any
     // errors before calling these.
     const table_metadata& table() const { return table_; }
     const updates_and_reqs& updates() const { return updates_; }
+
+    // Construct a transaction object but immediately set error_ to non-nullopt.
+    // Only useful for testing.
+    static transaction make_with_error(table_metadata table, action::errc err) {
+        transaction tx{std::move(table)};
+        tx.error_ = err;
+        return tx;
+    }
 
 private:
     // Applies the given action to `table_`.

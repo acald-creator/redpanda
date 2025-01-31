@@ -247,14 +247,16 @@ std::ostream& operator<<(std::ostream& o, const protocol_metadata& m) {
     fmt::print(
       o,
       "{{group: {}, commit_index: {}, term: {}, prev_log_index: {}, "
-      "prev_log_term: {}, last_visible_index: {}, dirty_offset: {}}}",
+      "prev_log_term: {}, last_visible_index: {}, dirty_offset: {}, "
+      "prev_log_delta: {}}}",
       m.group,
       m.commit_index,
       m.term,
       m.prev_log_index,
       m.prev_log_term,
       m.last_visible_index,
-      m.dirty_offset);
+      m.dirty_offset,
+      m.prev_log_delta);
     return o;
 }
 
@@ -279,8 +281,8 @@ std::ostream& operator<<(std::ostream& o, const reply_result& r) {
     case reply_result::group_unavailable:
         o << "group_unavailable";
         return o;
-    case reply_result::timeout:
-        o << "timeout";
+    case reply_result::follower_busy:
+        o << "follower_busy";
         return o;
     }
     __builtin_unreachable();
@@ -631,7 +633,7 @@ void heartbeat_reply::serde_read(iobuf_parser& src, const serde::header& hdr) {
 append_entries_request::append_entries_request(
   vnode src,
   protocol_metadata m,
-  model::record_batch_reader r,
+  chunked_vector<model::record_batch> r,
   size_t size,
   flush_after_append f) noexcept
   : append_entries_request(src, vnode{}, m, std::move(r), size, f) {}
@@ -640,7 +642,7 @@ append_entries_request::append_entries_request(
   vnode src,
   vnode target,
   protocol_metadata m,
-  model::record_batch_reader r,
+  chunked_vector<model::record_batch> r,
   size_t size,
   flush_after_append f) noexcept
   : _source_node(src)
@@ -656,30 +658,14 @@ size_t append_entries_request::batches_size() const {
 
 ss::future<> append_entries_request::serde_async_write(iobuf& dst) {
     using serde::write;
+    using serde::write_async;
 
-    class streaming_writer {
-    public:
-        ss::future<ss::stop_iteration> operator()(model::record_batch b) {
-            co_await reflection::async_adl<model::record_batch>{}.to(
-              _out, std::move(b));
-            ++_count;
-            co_return ss::stop_iteration::no;
-        }
-        iobuf end_of_stream() {
-            iobuf header;
-            write(header, static_cast<uint32_t>(_count));
-            _out.prepend(std::move(header));
-            return std::move(_out);
-        }
-
-    private:
-        uint32_t _count = 0;
-        iobuf _out;
-    };
-
-    iobuf out = co_await _batches.consume(
-      streaming_writer{}, model::no_timeout);
-
+    iobuf out;
+    write(out, static_cast<uint32_t>(_batches.size()));
+    for (auto& batch : _batches) {
+        co_await reflection::async_adl<model::record_batch>{}.to(
+          out, std::move(batch));
+    }
     write(out, _source_node);
     write(out, _target_node_id);
     write(out, _meta);
@@ -699,7 +685,7 @@ append_entries_request::serde_async_direct_read(
 
     auto batch_count = read_nested<uint32_t>(in, 0U);
     // use chunked fifo as usually batches size is small
-    fragmented_vector<model::record_batch> batches{};
+    chunked_vector<model::record_batch> batches{};
     size_t batches_size{0};
     for (uint32_t i = 0; i < batch_count; ++i) {
         auto b = co_await reflection::async_adl<model::record_batch>{}.from(in);
@@ -714,61 +700,18 @@ append_entries_request::serde_async_direct_read(
     auto flush = read_nested<raft::flush_after_append>(in, 0U);
 
     co_return append_entries_request(
-      node_id,
-      target_node_id,
-      meta,
-      model::make_foreign_fragmented_memory_record_batch_reader(
-        std::move(batches)),
-      batches_size,
-      flush);
-}
-
-append_entries_request
-append_entries_request::make_foreign(append_entries_request&& req) {
-    auto src_node = req._source_node;
-    auto target_node = req._target_node_id;
-    auto metadata = req._meta;
-    auto flush = req._flush;
-    auto raw_size = req.batches_size();
-    return {
-      src_node,
-      target_node,
-      metadata,
-      model::make_foreign_record_batch_reader(std::move(req).release_batches()),
-      raw_size,
-      flush};
+      node_id, target_node_id, meta, std::move(batches), batches_size, flush);
 }
 
 ss::future<>
 append_entries_request_serde_wrapper::serde_async_write(iobuf& dst) {
     using serde::write;
 
-    class streaming_writer {
-    public:
-        ss::future<ss::stop_iteration> operator()(model::record_batch b) {
-            co_await serde::write_async(_out, std::move(b));
-            ++_count;
-            co_return ss::stop_iteration::no;
-        }
-        iobuf end_of_stream() {
-            iobuf header;
-            write(header, static_cast<uint32_t>(_count));
-            _out.prepend(std::move(header));
-            return std::move(_out);
-        }
-
-    private:
-        uint32_t _count = 0;
-        iobuf _out;
-    };
-
     write(dst, _request.source_node());
     write(dst, _request.target_node());
     write(dst, _request.metadata());
     write(dst, _request.is_flush_required());
-    iobuf batches = co_await std::move(_request).release_batches().consume(
-      streaming_writer{}, model::no_timeout);
-    dst.append_fragments(std::move(batches));
+    co_await serde::write_async(dst, std::move(_request).release_batches());
 }
 
 ss::future<append_entries_request_serde_wrapper>
@@ -783,7 +726,8 @@ append_entries_request_serde_wrapper::serde_async_direct_read(
     auto flush = read_nested<raft::flush_after_append>(src, 0U);
     auto batch_count = read_nested<uint32_t>(src, 0U);
 
-    fragmented_vector<model::record_batch> batches{};
+    chunked_vector<model::record_batch> batches{};
+    batches.reserve(batch_count);
     size_t batches_size{0};
     for (uint32_t i = 0; i < batch_count; ++i) {
         auto b = co_await serde::read_async_nested<model::record_batch>(
@@ -794,23 +738,30 @@ append_entries_request_serde_wrapper::serde_async_direct_read(
     }
 
     co_return append_entries_request(
-      node_id,
-      target_node_id,
-      meta,
-      model::make_foreign_fragmented_memory_record_batch_reader(
-        std::move(batches)),
-      batches_size,
-      flush);
+      node_id, target_node_id, meta, std::move(batches), batches_size, flush);
 }
 
 std::ostream& operator<<(std::ostream& o, const append_entries_request& r) {
-    fmt::print(
-      o,
-      "node_id {} target_node_id {} meta {} batches {}",
-      r._source_node,
-      r._target_node_id,
-      r._meta,
-      r._batches);
+    if (r._batches.empty()) {
+        fmt::print(
+          o,
+          "node_id: {}, target_node_id: {}, protocol metadata: {}, batches: "
+          "{{}}",
+          r._source_node,
+          r._target_node_id,
+          r._meta);
+    } else {
+        fmt::print(
+          o,
+          "node_id: {}, target_node_id: {}, protocol metadata: {}, batch "
+          "count: {}, offset range: [{},{}]",
+          r._source_node,
+          r._target_node_id,
+          r._meta,
+          r._batches.size(),
+          r._batches.front().base_offset(),
+          r._batches.back().last_offset());
+    }
     return o;
 }
 

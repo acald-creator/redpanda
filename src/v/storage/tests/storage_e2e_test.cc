@@ -1047,7 +1047,7 @@ FIXTURE_TEST(append_concurrent_with_prefix_truncate, storage_test_fixture) {
     auto ntp = model::controller_ntp;
 
     storage::ntp_config ntp_cfg(ntp, mgr.config().base_dir);
-    auto log = mgr.manage(std::move(ntp_cfg)).get0();
+    auto log = mgr.manage(std::move(ntp_cfg)).get();
 
     bool stop = false;
     size_t cnt = 0;
@@ -1822,8 +1822,9 @@ FIXTURE_TEST(adjacent_segment_compaction, storage_test_fixture) {
 
     // There are 4 segments, and the last is the active segments. The first two
     // will merge, and the third will be compacted but not merged.
+
     log->housekeeping(c_cfg).get();
-    BOOST_REQUIRE_EQUAL(log->segment_count(), 4);
+    BOOST_REQUIRE_EQUAL(log->segment_count(), 3);
 
     // Check if it honors max_compactible offset by resetting it to the base
     // offset of first segment. Nothing should be compacted.
@@ -1831,13 +1832,11 @@ FIXTURE_TEST(adjacent_segment_compaction, storage_test_fixture) {
     c_cfg.compact.max_collectible_offset
       = first_segment_offsets.get_base_offset();
     log->housekeeping(c_cfg).get();
-    BOOST_REQUIRE_EQUAL(log->segment_count(), 4);
-
-    // The segment count will be reduced again.
-    c_cfg.compact.max_collectible_offset = model::offset::max();
-    log->housekeeping(c_cfg).get();
     BOOST_REQUIRE_EQUAL(log->segment_count(), 3);
 
+    // Now compact without restricting collectible offset. The segment count
+    // will be reduced again.
+    c_cfg.compact.max_collectible_offset = model::offset::max();
     log->housekeeping(c_cfg).get();
     BOOST_REQUIRE_EQUAL(log->segment_count(), 2);
 
@@ -1890,9 +1889,6 @@ FIXTURE_TEST(adjacent_segment_compaction_terms, storage_test_fixture) {
       as);
 
     // compact all the individual segments
-    log->housekeeping(c_cfg).get();
-    BOOST_REQUIRE_EQUAL(disk_log->segment_count(), 6);
-
     // the two segments with term 2 can be combined
     log->housekeeping(c_cfg).get();
     BOOST_REQUIRE_EQUAL(disk_log->segment_count(), 5);
@@ -1965,21 +1961,15 @@ FIXTURE_TEST(max_adjacent_segment_compaction, storage_test_fixture) {
       as);
 
     // self compaction steps
-    log->housekeeping(c_cfg).get();
-    BOOST_REQUIRE_EQUAL(disk_log->segment_count(), 6);
-
     // the first two segments are combined 2+2=4 < 6 MB
     log->housekeeping(c_cfg).get();
     BOOST_REQUIRE_EQUAL(disk_log->segment_count(), 5);
 
     // the new first and second are too big 4+5 > 6 MB but the second and third
     // can be combined 5 + 15KB < 6 MB
-    log->housekeeping(c_cfg).get();
-    BOOST_REQUIRE_EQUAL(disk_log->segment_count(), 4);
-
     // then the next 16 KB can be folded in
     log->housekeeping(c_cfg).get();
-    BOOST_REQUIRE_EQUAL(disk_log->segment_count(), 3);
+    BOOST_REQUIRE_EQUAL(disk_log->segment_count(), 4);
 
     // that's all that can be done. the next seg is an appender
     log->housekeeping(c_cfg).get();
@@ -2180,16 +2170,16 @@ FIXTURE_TEST(compaction_backlog_calculation, storage_test_fixture) {
     // self compaction steps
     log->housekeeping(c_cfg).get();
 
-    BOOST_REQUIRE_EQUAL(disk_log->segment_count(), 5);
+    BOOST_REQUIRE_EQUAL(disk_log->segment_count(), 4);
     auto new_backlog_size = log->compaction_backlog();
     /**
      * after all self segments are compacted they shouldn't be included into the
      * backlog (only last segment is since it has appender and isn't self
      * compacted)
      */
-    BOOST_REQUIRE_EQUAL(
+    BOOST_REQUIRE_LT(
       new_backlog_size,
-      backlog_size - self_seg_compaction_sz + segments[4]->size_bytes());
+      backlog_size - self_seg_compaction_sz + segments[3]->size_bytes());
 }
 
 FIXTURE_TEST(not_compacted_log_backlog, storage_test_fixture) {
@@ -4061,7 +4051,7 @@ FIXTURE_TEST(test_skipping_compaction_below_start_offset, log_builder_fixture) {
     auto& first_seg = log.segments().front();
     BOOST_REQUIRE_EQUAL(first_seg->finished_self_compaction(), false);
 
-    b.apply_compaction(cfg.compact, *new_start_offset).get();
+    b.apply_adjacent_merge_compaction(cfg.compact, *new_start_offset).get();
 
     BOOST_REQUIRE_EQUAL(first_seg->finished_self_compaction(), false);
 
@@ -4235,6 +4225,60 @@ FIXTURE_TEST(reader_reusability_max_bytes, storage_test_fixture) {
     // if we can only fit 2 batches in the log, the reader will be exhausted
     // after the second reader, so should be !is_resusable
     test_case(400000, 300000, false);
+}
+
+FIXTURE_TEST(
+  test_offset_range_size_after_mid_segment_truncation, storage_test_fixture) {
+    size_t num_segments = 2;
+    model::offset first_segment_last_offset;
+    auto cfg = default_log_config(test_dir);
+    storage::log_manager mgr = make_log_manager(cfg);
+    info("Configuration: {}", mgr.config());
+    auto deferred = ss::defer([&mgr]() mutable { mgr.stop().get(); });
+    auto ntp = model::ntp("redpanda", "test-topic", 0);
+
+    storage::ntp_config ntp_cfg(ntp, mgr.config().base_dir);
+
+    auto log = mgr.manage(std::move(ntp_cfg)).get();
+    for (size_t i = 0; i < num_segments; i++) {
+        append_random_batches(
+          log,
+          10,
+          model::term_id(0),
+          custom_ts_batch_generator(model::timestamp::now()));
+        if (first_segment_last_offset == model::offset{}) {
+            first_segment_last_offset = log->offsets().dirty_offset;
+        }
+        log->force_roll(ss::default_priority_class()).get();
+    }
+
+    // Prefix truncate such that offset 1 is the new log start.
+    log
+      ->truncate_prefix(storage::truncate_prefix_config(
+        model::offset(1), ss::default_priority_class()))
+      .get();
+
+    // Run size queries on ranges that don't exist in the log, but whose range
+    // is still included in a segment.
+
+    BOOST_CHECK(
+      log
+        ->offset_range_size(
+          model::offset(0), model::offset(1), ss::default_priority_class())
+        .get()
+      == std::nullopt);
+
+    BOOST_CHECK(
+      log
+        ->offset_range_size(
+          model::offset(0),
+          storage::log::offset_range_size_requirements_t{
+            .target_size = 1,
+            .min_size = 0,
+          },
+          ss::default_priority_class())
+        .get()
+      == std::nullopt);
 }
 
 FIXTURE_TEST(test_offset_range_size, storage_test_fixture) {
@@ -4907,6 +4951,7 @@ FIXTURE_TEST(test_offset_range_size2_compacted, storage_test_fixture) {
         BOOST_REQUIRE(result->on_disk_size >= target_size);
     }
 
+    info("Prefix truncating");
     auto new_start_offset = model::next_offset(first_segment_last_offset);
     log
       ->truncate_prefix(storage::truncate_prefix_config(
@@ -4918,6 +4963,7 @@ FIXTURE_TEST(test_offset_range_size2_compacted, storage_test_fixture) {
 
     // Check that out of range access triggers exception.
 
+    info("Checking for null on out-of-range");
     BOOST_REQUIRE(
       log
         ->offset_range_size(
@@ -4959,6 +5005,7 @@ FIXTURE_TEST(test_offset_range_size2_compacted, storage_test_fixture) {
         .get()
       == std::nullopt);
 
+    info("Checking the last batch");
     // Check that the last batch can be measured independently
     auto res = log
                  ->offset_range_size(
@@ -4980,6 +5027,7 @@ FIXTURE_TEST(test_offset_range_size2_compacted, storage_test_fixture) {
     size_t tail_length = 5;
 
     for (size_t i = 0; i < tail_length; i++) {
+        info("Checking i = {}", i);
         auto ix_batch = c_summaries.size() - 1 - i;
         res = log
                 ->offset_range_size(
@@ -4997,6 +5045,7 @@ FIXTURE_TEST(test_offset_range_size2_compacted, storage_test_fixture) {
     }
 
     // Check that the min_size is respected
+    info("Checking the back segment");
     BOOST_REQUIRE(
       log
         ->offset_range_size(

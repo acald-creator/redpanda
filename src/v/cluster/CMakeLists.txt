@@ -97,6 +97,7 @@ v_cc_library(
     topic_configuration.cc
     topic_properties.cc
   DEPS
+    v::config
     v::model
     v::reflection
     v::serde
@@ -224,10 +225,6 @@ v_cc_library(
     archival/scrubber.cc
     archival/archiver_manager.cc
     archival/async_data_uploader.cc
-    archival/archiver_operations_api.cc
-    archival/archiver_operations_impl.cc
-    archival/archiver_scheduler_api.cc
-    archival/archiver_scheduler_impl.cc
     cloud_metadata/cluster_manifest.cc
     cloud_metadata/cluster_recovery_backend.cc
     cloud_metadata/key_utils.cc

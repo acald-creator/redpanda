@@ -38,8 +38,7 @@ redpanda_cc_btest(
 )
 
 redpanda_cc_bench(
-    name = "zstd_stream_bench",
-    timeout = "short",
+    name = "zstd_stream_rpbench",
     srcs = [
         "zstd_stream_bench.cc",
     ],

@@ -150,8 +150,7 @@ redpanda_cc_btest(
 )
 
 redpanda_cc_bench(
-    name = "rpc_bench",
-    timeout = "short",
+    name = "rpc_serialization_rpbench",
     srcs = [
         "rpc_bench.cc",
     ],

@@ -253,6 +253,7 @@ append_entries_queue::append_entries_queue(
         }
         _current_max_inflight_requests = new_value;
     });
+    setup_internal_metrics();
     // start dispatch loop
     ssx::repeat_until_gate_closed(
       _gate,
@@ -282,6 +283,9 @@ ss::future<> append_entries_queue::do_dispatch(
   request_entry entry, ssx::semaphore_units inflight_units) {
     auto sent_ts = clock_type::now();
     _last_sent_timestamp = sent_ts;
+    // update timeout not to account for the time in a queue
+    entry.opts.timeout = rpc::timeout_spec::from_now(
+      entry.opts.timeout.timeout_period);
     return _base_protocol
       .append_entries(
         _target_node, std::move(entry.request), std::move(entry.opts))
@@ -357,7 +361,7 @@ void append_entries_queue::setup_internal_metrics() {
     }
     sm::label_instance target_node_id_label("target_node_id", _target_node);
     _internal_metrics.add_group(
-      prometheus_sanitize::metrics_name("raft::buffered::protocol"),
+      prometheus_sanitize::metrics_name("raft:buffered:protocol"),
       {sm::make_gauge(
          "inflight_requests",
          [this] { return inflight_requests(); },
@@ -374,12 +378,7 @@ void append_entries_queue::setup_internal_metrics() {
          [this] { return _requests.size(); },
          sm::description(
            "Total number of append entries requests in the queue"),
-         {target_node_id_label}),
-       sm::make_histogram(
-         "append_entries_request_latency",
-         sm::description("Latency of append entries requests"),
-         {target_node_id_label},
-         [this] { return _hist.internal_histogram_logform(); })});
+         {target_node_id_label})});
 }
 
 void append_entries_queue::setup_public_metrics() {

@@ -18,6 +18,7 @@
 #include "features/enterprise_feature_messages.h"
 #include "json/stringbuffer.h"
 #include "json/writer.h"
+#include "model/metadata.h"
 #include "pandaproxy/schema_registry/schema_id_validation.h"
 #include "utils/to_string.h"
 
@@ -686,6 +687,10 @@ consteval std::string_view property_type_name() {
         return "leaders_preference";
     } else if constexpr (std::is_same_v<type, config::datalake_catalog_type>) {
         return "string";
+    } else if constexpr (std::is_same_v<
+                           type,
+                           model::iceberg_invalid_record_action>) {
+        return "string";
     } else {
         static_assert(
           base::unsupported_type<T>::value, "Type name not defined");
@@ -1090,6 +1095,11 @@ public:
         }
         return std::nullopt;
     }
+
+    /**
+     * @brief Checks current value of property to see if it is restricted
+     */
+    bool is_restricted() const { return do_check_restricted(this->value()); }
 
 private:
     bool do_check_restricted(const T& setting) const final {

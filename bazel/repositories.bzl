@@ -73,9 +73,9 @@ def data_dependency():
     http_archive(
         name = "krb5",
         build_file = "//bazel/thirdparty:krb5.BUILD",
-        sha256 = "ec3861c3bec29aa8da9281953c680edfdab1754d1b1db8761c1d824e4b25496a",
-        strip_prefix = "krb5-krb5-1.20.1-final",
-        url = "https://vectorized-public.s3.us-west-2.amazonaws.com/dependencies/krb5-krb5-1.20.1-final.tar.gz",
+        sha256 = "2157d92020d408ed63ebcd886a92d1346a1383b0f91123a0473b4f69b4a24861",
+        strip_prefix = "krb5-krb5-1.21.3-final",
+        url = "https://github.com/krb5/krb5/archive/refs/tags/krb5-1.21.3-final.tar.gz",
     )
 
     http_archive(
@@ -167,9 +167,9 @@ def data_dependency():
     http_archive(
         name = "seastar",
         build_file = "//bazel/thirdparty:seastar.BUILD",
-        sha256 = "254bd1c2d26bb2d9df8e5217e1c50a2f08bce58b0a6d13cdc692192ee8b79a56",
-        strip_prefix = "seastar-f194d34ef62b5a64364291b941f97a9cd19b7835",
-        url = "https://github.com/redpanda-data/seastar/archive/f194d34ef62b5a64364291b941f97a9cd19b7835.tar.gz",
+        sha256 = "cd235a75a15a2fff0bdc12462d28862ecbc96ac34445725d545c0041f32dfb39",
+        strip_prefix = "seastar-3aa6ca607d0227052301427d400e50bbdd70f37b",
+        url = "https://github.com/redpanda-data/seastar/archive/3aa6ca607d0227052301427d400e50bbdd70f37b.tar.gz",
         patches = ["//bazel/thirdparty:seastar-fortify-source.patch"],
         patch_args = ["-p1"],
     )
@@ -196,4 +196,24 @@ def data_dependency():
         sha256 = "716fbe4fc85ecd36488afbbc635b59b5ab6aba5ed3b69d4a32a46eae5a453d38",
         strip_prefix = "xxHash-bbb27a5efb85b92a0486cf361a8635715a53f6ba",
         url = "https://github.com/Cyan4973/xxHash/archive/bbb27a5efb85b92a0486cf361a8635715a53f6ba.tar.gz",
+    )
+
+    sysroot_build_file = """
+filegroup(
+  name = "sysroot",
+  srcs = glob(["*/**"]),
+  visibility = ["//visibility:public"],
+)"""
+    http_archive(
+        name = "x86_64_sysroot",
+        build_file_content = sysroot_build_file,
+        sha256 = "7639199d529a2aee4b0007a2c55f6178235e732782ca47795a3022342e7ad985",
+        urls = ["http://redpanda-core-toolchain.s3-website-us-east-1.amazonaws.com/sysroot-ubuntu-22.04-x86_64-2025-01-26.tar.gz"],
+    )
+
+    http_archive(
+        name = "aarch64_sysroot",
+        build_file_content = sysroot_build_file,
+        sha256 = "536cc7a4e0eb41418239da62f7f8d7205f1006fa5670f4ab8fab4a8db86de087",
+        urls = ["http://redpanda-core-toolchain.s3-website-us-east-1.amazonaws.com/sysroot-ubuntu-22.04-aarch64-2025-01-26.tar.gz"],
     )

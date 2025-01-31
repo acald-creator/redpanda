@@ -33,7 +33,7 @@ namespace cluster {
  */
 struct topic_properties
   : serde::
-      envelope<topic_properties, serde::version<10>, serde::compat_version<0>> {
+      envelope<topic_properties, serde::version<11>, serde::compat_version<0>> {
     topic_properties() noexcept = default;
     topic_properties(
       std::optional<model::compression> compression,
@@ -76,7 +76,10 @@ struct topic_properties
       std::optional<config::leaders_preference> leaders_preference,
       bool cloud_topic_enabled,
       tristate<std::chrono::milliseconds> delete_retention_ms,
-      std::optional<bool> iceberg_delete)
+      std::optional<bool> iceberg_delete,
+      std::optional<ss::sstring> iceberg_partition_spec,
+      std::optional<model::iceberg_invalid_record_action>
+        iceberg_invalid_record_action)
       : compression(compression)
       , cleanup_policy_bitflags(cleanup_policy_bitflags)
       , compaction_strategy(compaction_strategy)
@@ -118,7 +121,9 @@ struct topic_properties
       , leaders_preference(std::move(leaders_preference))
       , cloud_topic_enabled(cloud_topic_enabled)
       , delete_retention_ms(delete_retention_ms)
-      , iceberg_delete(iceberg_delete) {}
+      , iceberg_delete(iceberg_delete)
+      , iceberg_partition_spec(std::move(iceberg_partition_spec))
+      , iceberg_invalid_record_action(iceberg_invalid_record_action) {}
 
     std::optional<model::compression> compression;
     std::optional<model::cleanup_policy_bitflags> cleanup_policy_bitflags;
@@ -194,6 +199,12 @@ struct topic_properties
     tristate<std::chrono::milliseconds> delete_retention_ms{disable_tristate};
     // Should we delete the corresponding iceberg table when deleting the topic.
     std::optional<bool> iceberg_delete;
+    // Partition spec expression for the corresponding Iceberg table.
+    // std::nullopt means that the cluster default will be used.
+    std::optional<ss::sstring> iceberg_partition_spec;
+
+    std::optional<model::iceberg_invalid_record_action>
+      iceberg_invalid_record_action;
 
     bool is_compacted() const;
     bool has_overrides() const;
@@ -241,7 +252,9 @@ struct topic_properties
           leaders_preference,
           cloud_topic_enabled,
           delete_retention_ms,
-          iceberg_delete);
+          iceberg_delete,
+          iceberg_partition_spec,
+          iceberg_invalid_record_action);
     }
 
     friend bool operator==(const topic_properties&, const topic_properties&)

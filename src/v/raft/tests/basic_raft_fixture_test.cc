@@ -63,19 +63,19 @@ TEST_F(raft_fixture, test_empty_writes) {
     create_simple_group(5).get();
     auto leader = wait_for_leader(10s).get();
 
-    auto replicate = [&](auto reader) {
+    auto replicate = [&](chunked_vector<model::record_batch> batches) {
         return node(leader).raft()->replicate(
-          std::move(reader), replicate_options{consistency_level::quorum_ack});
+          std::move(batches), replicate_options{consistency_level::quorum_ack});
     };
 
     // no records
     storage::record_batch_builder builder(
       model::record_batch_type::raft_data, model::offset(0));
-    auto reader = model::make_memory_record_batch_reader(
-      std::move(builder).build());
 
     // Catch the error when appending.
-    auto res = replicate(std::move(reader)).get();
+    auto res = replicate(chunked_vector<model::record_batch>::single(
+                           std::move(builder).build()))
+                 .get();
     ASSERT_TRUE(res.has_error());
     ASSERT_EQ(res.error(), errc::leader_append_failed);
 
@@ -835,4 +835,30 @@ TEST_F_CORO(raft_fixture, leadership_transfer_delay) {
      */
     ASSERT_LE_CORO(election_time * 1.0, transfer_time * tolerance_multiplier);
     ASSERT_GE_CORO(election_time * 1.0, transfer_time / tolerance_multiplier);
+}
+
+TEST_F_CORO(raft_fixture, test_no_stepdown_on_append_entries_timeout) {
+    config::shard_local_cfg().replicate_append_timeout_ms.set_value(1s);
+    co_await create_simple_group(3);
+    auto leader_id = co_await wait_for_leader(10s);
+    for (auto& [id, n] : nodes()) {
+        if (id != leader_id) {
+            n->f_injectable_log()->set_append_delay([]() { return 5s; });
+        }
+    }
+
+    auto& leader_node = node(leader_id);
+    auto term_before = leader_node.raft()->term();
+    auto r = co_await leader_node.raft()->replicate(
+      make_batches(1, 10, 128),
+      replicate_options(consistency_level::quorum_ack, 10s));
+    ASSERT_FALSE_CORO(r.has_error());
+    for (auto& [_, n] : nodes()) {
+        n->f_injectable_log()->set_append_delay(std::nullopt);
+    }
+
+    leader_id = co_await wait_for_leader(10s);
+    auto& new_leader_node = node(leader_id);
+    ASSERT_EQ_CORO(term_before, new_leader_node.raft()->term());
+    ASSERT_TRUE_CORO(new_leader_node.raft()->is_leader());
 }

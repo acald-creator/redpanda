@@ -10,8 +10,10 @@
  */
 #pragma once
 
+#include "bytes/random.h"
 #include "compat/generator.h"
 #include "model/tests/random_batch.h"
+#include "raft/transfer_leadership.h"
 #include "raft/types.h"
 #include "random/generators.h"
 #include "test_utils/randoms.h"
@@ -322,7 +324,7 @@ struct instance_generator<raft::append_entries_request> {
           instance_generator<raft::vnode>::random(),
           instance_generator<raft::vnode>::random(),
           instance_generator<raft::protocol_metadata>::random(),
-          model::make_memory_record_batch_reader(
+          chunked_vector<model::record_batch>(
             model::test::make_random_batches(model::offset(0), 3, false).get()),
           0,
           raft::flush_after_append(tests::random_bool()),
@@ -347,7 +349,7 @@ struct instance_generator<raft::append_entries_reply> {
             {raft::reply_result::success,
              raft::reply_result::failure,
              raft::reply_result::group_unavailable,
-             raft::reply_result::timeout}),
+             raft::reply_result::follower_busy}),
           .may_recover = tests::random_bool(),
         };
     }

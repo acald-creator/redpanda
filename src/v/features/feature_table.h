@@ -51,7 +51,6 @@ enum class feature : std::uint64_t {
     enhanced_force_reconfiguration = 1ULL << 33U,
     broker_time_based_retention = 1ULL << 34U,
     wasm_transforms = 1ULL << 35U,
-    raft_config_serde = 1ULL << 36U,
     fast_partition_reconfiguration = 1ULL << 38U,
     disabling_partitions = 1ULL << 39U,
     cloud_metadata_cluster_recovery = 1ULL << 40U,
@@ -69,7 +68,9 @@ enum class feature : std::uint64_t {
     partition_properties_stm = 1ULL << 52U,
     shadow_indexing_split_topic_property_update = 1ULL << 53U,
     datalake_iceberg = 1ULL << 54U,
-
+    raft_symmetric_reconfiguration_cancel = 1ULL << 55U,
+    datalake_iceberg_ga = 1ULL << 56U,
+    cloud_storage_metadata_rw_fence = 1ULL << 57U,
     // Dummy features for testing only
     test_alpha = 1ULL << 61U,
     test_bravo = 1ULL << 62U,
@@ -113,6 +114,7 @@ inline const std::unordered_set<std::string_view> retired_features = {
   "partition_move_revert_cancel",
   "rpc_transport_unknown_errc",
   "raft_append_entries_serde",
+  "raft_config_serde",
 };
 
 // The latest_version associated with past releases. Increment this
@@ -308,12 +310,6 @@ inline constexpr std::array feature_schema{
     feature_spec::prepare_policy::always},
   feature_spec{
     release_version::v23_3_1,
-    "raft_config_serde",
-    feature::raft_config_serde,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v23_3_1,
     "fast_partition_reconfiguration",
     feature::fast_partition_reconfiguration,
     feature_spec::available_policy::always,
@@ -412,6 +408,24 @@ inline constexpr std::array feature_schema{
     release_version::v24_3_1,
     "datalake_iceberg",
     feature::datalake_iceberg,
+    feature_spec::available_policy::always,
+    feature_spec::prepare_policy::always},
+  feature_spec{
+    release_version::v25_1_1,
+    "raft_symmetric_reconfiguration_cancel",
+    feature::raft_symmetric_reconfiguration_cancel,
+    feature_spec::available_policy::always,
+    feature_spec::prepare_policy::always},
+  feature_spec{
+    release_version::v25_1_1,
+    "datalake_iceberg_ga",
+    feature::datalake_iceberg_ga,
+    feature_spec::available_policy::always,
+    feature_spec::prepare_policy::always},
+  feature_spec{
+    release_version::v25_1_1,
+    "cloud_storage_read_write_fence",
+    feature::cloud_storage_metadata_rw_fence,
     feature_spec::available_policy::always,
     feature_spec::prepare_policy::always},
 };

@@ -225,11 +225,13 @@ bool group::valid_previous_state(group_state s) const {
 group::ongoing_transaction::ongoing_transaction(
   model::tx_seq tx_seq,
   model::partition_id coordinator_partition,
-  model::timeout_clock::duration tx_timeout)
+  model::timeout_clock::duration tx_timeout,
+  model::offset begin_offset)
   : tx_seq(tx_seq)
   , coordinator_partition(coordinator_partition)
   , timeout(tx_timeout)
-  , last_update(model::timeout_clock::now()) {}
+  , last_update(model::timeout_clock::now())
+  , begin_offset(begin_offset) {}
 
 group::tx_producer::tx_producer(model::producer_epoch epoch)
   : epoch(epoch) {}
@@ -1911,10 +1913,10 @@ group::begin_tx(cluster::begin_group_tx_request r) {
     // replicate fence batch - this is a transaction boundary
     model::record_batch batch = make_tx_fence_batch(
       r.pid, std::move(fence), use_dedicated_batch_type_for_fence());
-    auto reader = model::make_memory_record_batch_reader(std::move(batch));
+
     auto result = co_await _partition->raft()->replicate(
       _term,
-      std::move(reader),
+      std::move(batch),
       raft::replicate_options(raft::consistency_level::quorum_ack));
 
     if (!result) {
@@ -1934,7 +1936,8 @@ group::begin_tx(cluster::begin_group_tx_request r) {
       r.pid.get_id(), r.pid.get_epoch());
     producer_it->second.epoch = r.pid.get_epoch();
     producer_it->second.transaction = std::make_unique<ongoing_transaction>(
-      ongoing_transaction(r.tx_seq, r.tm_partition, r.timeout));
+      ongoing_transaction(
+        r.tx_seq, r.tm_partition, r.timeout, result.value().last_offset));
 
     try_arm(producer_it->second.transaction->deadline());
 
@@ -2056,11 +2059,10 @@ group::store_txn_offsets(txn_offset_commit_request r) {
       prepared_tx_record_version,
       pid,
       std::move(tx_entry));
-    auto reader = model::make_memory_record_batch_reader(std::move(batch));
 
     auto result = co_await _partition->raft()->replicate(
       _term,
-      std::move(reader),
+      std::move(batch),
       raft::replicate_options(raft::consistency_level::quorum_ack));
 
     if (!result) {
@@ -2227,12 +2229,9 @@ group::offset_commit_stages group::store_offsets(offset_commit_request&& r) {
           offset_commit_response(r, error_code::none));
     }
 
-    auto batch = std::move(builder).build();
-    auto reader = model::make_memory_record_batch_reader(std::move(batch));
-
     auto replicate_stages = _partition->raft()->replicate_in_stages(
       _term,
-      std::move(reader),
+      chunked_vector<model::record_batch>::single(std::move(builder).build()),
       raft::replicate_options(raft::consistency_level::quorum_ack));
 
     auto f = replicate_stages.replicate_finished.then(
@@ -2583,12 +2582,20 @@ ss::future<error_code> group::remove() {
         co_return error_code::group_id_not_found;
 
     case group_state::empty:
-        set_state(group_state::dead);
         break;
 
     default:
         co_return error_code::non_empty_group;
     }
+
+    // check if there are any transactions in progress
+    // tombstoning a group with open transactions will result
+    // in hanging transactions in the log.
+    if (has_transactions_in_progress()) {
+        co_return error_code::non_empty_group;
+    }
+
+    set_state(group_state::dead);
 
     // build offset tombstones
     storage::record_batch_builder builder(
@@ -2602,12 +2609,11 @@ ss::future<error_code> group::remove() {
     add_group_tombstone_record(_id, builder);
 
     auto batch = std::move(builder).build();
-    auto reader = model::make_memory_record_batch_reader(std::move(batch));
 
     try {
         auto result = co_await _partition->raft()->replicate(
           _term,
-          std::move(reader),
+          std::move(batch),
           raft::replicate_options(raft::consistency_level::quorum_ack));
         if (result) {
             vlog(
@@ -2689,12 +2695,11 @@ ss::future<> group::remove_topic_partitions(
     }
 
     auto batch = std::move(builder).build();
-    auto reader = model::make_memory_record_batch_reader(std::move(batch));
 
     try {
         auto result = co_await _partition->raft()->replicate(
           _term,
-          std::move(reader),
+          std::move(batch),
           raft::replicate_options(raft::consistency_level::quorum_ack));
         if (result) {
             vlog(
@@ -2729,7 +2734,7 @@ ss::future<result<raft::replicate_result>>
 group::store_group(model::record_batch batch) {
     return _partition->raft()->replicate(
       _term,
-      model::make_memory_record_batch_reader(std::move(batch)),
+      std::move(batch),
       raft::replicate_options(raft::consistency_level::quorum_ack));
 }
 
@@ -2959,11 +2964,10 @@ ss::future<cluster::abort_group_tx_reply> group::do_abort(
       aborted_tx_record_version,
       pid,
       std::move(tx));
-    auto reader = model::make_memory_record_batch_reader(std::move(batch));
 
     auto result = co_await _partition->raft()->replicate(
       _term,
-      std::move(reader),
+      std::move(batch),
       raft::replicate_options(raft::consistency_level::quorum_ack));
 
     if (!result) {
@@ -3082,7 +3086,7 @@ ss::future<cluster::commit_group_tx_reply> group::do_commit(
     // tx_gateway_frontend). So redpanda will eventually finish commit and
     // complete write for both this events.
 
-    model::record_batch_reader::data_t batches;
+    chunked_vector<model::record_batch> batches;
     batches.reserve(2);
     // if pending offsets are empty, (there was no store_txn_offsets call, do
     // not replicate the offsets update batch)
@@ -3114,11 +3118,9 @@ ss::future<cluster::commit_group_tx_reply> group::do_commit(
 
     batches.push_back(std::move(batch));
 
-    auto reader = model::make_memory_record_batch_reader(std::move(batches));
-
     auto result = co_await _partition->raft()->replicate(
       _term,
-      std::move(reader),
+      std::move(batches),
       raft::replicate_options(raft::consistency_level::quorum_ack));
 
     if (!result) {
@@ -3557,14 +3559,18 @@ group::get_expired_offsets(std::chrono::seconds retention_period) {
     }
 }
 
+bool group::has_transactions_in_progress() const {
+    return std::any_of(
+      _producers.begin(),
+      _producers.end(),
+      [](const producers_map::value_type& p) {
+          return p.second.transaction != nullptr;
+      });
+}
+
 bool group::has_offsets() const {
     return !_offsets.empty() || !_pending_offset_commits.empty()
-           || std::any_of(
-             _producers.begin(),
-             _producers.end(),
-             [](const producers_map::value_type& p) {
-                 return p.second.transaction != nullptr;
-             });
+           || has_transactions_in_progress();
 }
 
 std::vector<model::topic_partition>
