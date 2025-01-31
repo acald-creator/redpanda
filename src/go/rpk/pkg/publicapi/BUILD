@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "controlplane.go",
         "dataplane.go",
+        "enterprise.go",
         "publicapi.go",
         "transform.go",
     ],
@@ -19,6 +20,7 @@ go_library(
         "@build_buf_gen_go_redpandadata_common_protocolbuffers_go//redpanda/api/common/v1alpha1",
         "@build_buf_gen_go_redpandadata_dataplane_connectrpc_go//redpanda/api/dataplane/v1alpha2/dataplanev1alpha2connect",
         "@build_buf_gen_go_redpandadata_dataplane_protocolbuffers_go//redpanda/api/dataplane/v1alpha2",
+        "@build_buf_gen_go_redpandadata_gatekeeper_connectrpc_go//redpanda/api/gatekeeper/v1alpha1/gatekeeperv1alpha1connect",
         "@com_connectrpc_connect//:connect",
         "@org_uber_go_zap//:zap",
     ],
