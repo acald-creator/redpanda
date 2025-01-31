@@ -130,6 +130,11 @@ simple_schema_manager::ensure_table_schema(
         .id = table_id.copy(),
         .schema = std::move(s),
         .partition_spec = std::move(resolve_res.value()),
+        .location = iceberg::uri(fmt::format(
+          "{}/{}",
+          table_location_prefix_(),
+          fmt::join(table_id.ns, "/"),
+          table_id.table)),
       });
 
     co_return std::nullopt;
@@ -146,6 +151,7 @@ simple_schema_manager::get_table_info(
       .id = it->second.id.copy(),
       .schema = it->second.schema.copy(),
       .partition_spec = it->second.partition_spec.copy(),
+      .location = it->second.location,
     };
 }
 
@@ -242,6 +248,7 @@ catalog_schema_manager::get_table_info(
       .id = table_id.copy(),
       .schema = cur_schema->copy(),
       .partition_spec = cur_spec->copy(),
+      .location = table.location,
     };
 }
 

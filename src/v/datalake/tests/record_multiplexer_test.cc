@@ -142,6 +142,8 @@ public:
           translator,
           t_creator,
           model::iceberg_invalid_record_action::dlq_table,
+          location_provider(
+            scoped_remote->remote.local().provider(), bucket_name),
           as);
         auto res = reader.consume(std::move(mux), model::no_timeout).get();
         if (expect_error) {

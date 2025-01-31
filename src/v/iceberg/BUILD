@@ -1231,6 +1231,7 @@ redpanda_cc_library(
         "//src/v/thirdparty/ada",
     ],
     include_prefix = "iceberg",
+    visibility = ["//visibility:public"],
     deps = [
         "//src/v/base",
         "//src/v/cloud_io:provider",
